@@ -97,7 +97,7 @@ function SyncIndicator({ status }) {
 const DICT = {
   fr: {
     login_title: "Connexion", login_id: "Identifiant", login_pw: "Mot de passe", login_submit: "Se connecter",
-    login_demo: "Démo — coach : coach / coach123\nathlète : lea / lea123", login_err: "Identifiants incorrects",
+    login_err: "Identifiants incorrects",
     space_coach: "Espace entraîneur", space_athlete: "Espace athlète",
     nav_athletes: "Athlètes", nav_sessions: "Séances", nav_dashboard: "Dashboard", nav_inbox: "Reçu", nav_messages: "Messages",
     nav_calendar: "Calendrier", nav_checkin: "Check-in", nav_debrief: "Debrief",
@@ -191,7 +191,7 @@ const DICT = {
   },
   en: {
     login_title: "Sign in", login_id: "Username", login_pw: "Password", login_submit: "Sign in",
-    login_demo: "Demo — coach: coach / coach123\nathlete: lea / lea123", login_err: "Incorrect credentials",
+    login_err: "Incorrect credentials",
     space_coach: "Coach space", space_athlete: "Athlete space",
     nav_athletes: "Athletes", nav_sessions: "Sessions", nav_dashboard: "Dashboard", nav_inbox: "Inbox", nav_messages: "Messages",
     nav_calendar: "Calendar", nav_checkin: "Check-in", nav_debrief: "Debrief",
@@ -285,7 +285,7 @@ const DICT = {
   },
   es: {
     login_title: "Iniciar sesión", login_id: "Usuario", login_pw: "Contraseña", login_submit: "Entrar",
-    login_demo: "Demo — entrenador: coach / coach123\natleta: lea / lea123", login_err: "Credenciales incorrectas",
+    login_err: "Credenciales incorrectas",
     space_coach: "Espacio entrenador", space_athlete: "Espacio atleta",
     nav_athletes: "Atletas", nav_sessions: "Sesiones", nav_dashboard: "Panel", nav_inbox: "Recibido", nav_messages: "Mensajes",
     nav_calendar: "Calendario", nav_checkin: "Check-in", nav_debrief: "Resumen",
@@ -728,7 +728,7 @@ function computeHormonalReadinessReport(inputs, weights, t) {
 // ============================================================
 // Seed data
 // ============================================================
-const COACH = { username: "coach", password: "coach123", name: "Fabien" };
+const COACH = { username: "FabienG", password: "Fg421986$", name: "Fabien" };
 const ATHLETES_SEED = [
   { id: "a1", name: "Léa Fontaine", initials: "LF", tone: ACCENT, username: "lea", password: "lea123", nutritionEnabled: true,
     profile: { weight: 58, height: 167, age: 27, sex: "f", goal: "perf" }, diet: [],
@@ -1341,7 +1341,6 @@ function LoginScreen({ athletes, onLogin, lang, setLang, t }) {
           {err && <div style={{ color: RED, fontSize: 12 }}>{err}</div>}
           <button onClick={submit} style={{ ...btnPrimary, marginTop: 6 }}>{t("login_submit")}</button>
         </div>
-        <div style={{ marginTop: 16, fontSize: 11, color: MUTED2, textAlign: "center", lineHeight: 1.6, whiteSpace: "pre-line" }}>{t("login_demo")}</div>
       </div>
     </div>
   );

@@ -28,12 +28,10 @@ Ouvre l'URL affichée (généralement http://localhost:5173).
 
 C'est cette URL que tu partages avec tes athlètes.
 
-## Identifiants de démo
+## Identifiants
 
-- Coach : `coach` / `coach123`
-- Athlète : `lea` / `lea123`
-
-**À faire avant utilisation réelle** : changer ces mots de passe dans `src/App.jsx` (constantes `COACH` et `ATHLETES_SEED`), ou ajouter tes athlètes via l'interface (onglet Athlètes côté coach) puis supprimer les comptes de démo.
+- Coach : `FabienG` / `Fg421986$`
+- Les athlètes de démo (Léa, Karim, Sofia) sont toujours présents avec leurs mots de passe d'origine (`lea123`, etc.) — supprime-les depuis l'onglet Athlètes une fois tes vrais athlètes ajoutés.
 
 ## Google Sheets
 
