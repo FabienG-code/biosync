@@ -1312,8 +1312,9 @@ function fileKind(name) {
 function LoginScreen({ athletes, onLogin, lang, setLang, t }) {
   const [u, setU] = useState(""); const [p, setP] = useState(""); const [err, setErr] = useState("");
   function submit() {
-    if (u === COACH.username && p === COACH.password) return onLogin({ role: "coach", name: COACH.name });
-    const ath = athletes.find(a => a.username === u && a.password === p);
+    const uClean = u.trim(), pClean = p.trim();
+    if (uClean === COACH.username && pClean === COACH.password) return onLogin({ role: "coach", name: COACH.name });
+    const ath = athletes.find(a => String(a.username) === uClean && String(a.password) === pClean);
     if (ath) return onLogin({ role: "athlete", athleteId: ath.id, name: ath.name });
     setErr(t("login_err"));
   }
@@ -1422,15 +1423,16 @@ function AthleteManager({ athletes, setAthletes, t }) {
   const [form, setForm] = useState({ name: "", username: "", password: "", sex: "f" });
   const [error, setError] = useState("");
   function addAthlete() {
-    if (!form.name.trim() || !form.username.trim() || !form.password.trim()) { setError("—"); return; }
-    if (athletes.some(a => a.username === form.username)) { setError("—"); return; }
+    const cleanName = form.name.trim(), cleanUsername = form.username.trim(), cleanPassword = form.password.trim();
+    if (!cleanName || !cleanUsername || !cleanPassword) { setError("—"); return; }
+    if (athletes.some(a => a.username === cleanUsername)) { setError("—"); return; }
     const palette = [ACCENT, AMBER, BLUE, "#C68CFF", "#F06FA0"];
-    const initials = form.name.split(" ").map(w => w[0]).slice(0, 2).join("").toUpperCase();
+    const initials = cleanName.split(" ").map(w => w[0]).slice(0, 2).join("").toUpperCase();
     const id = uid();
-    setAthletes(prev => [...prev, { id, name: form.name, initials, tone: palette[prev.length % palette.length], username: form.username, password: form.password,
+    setAthletes(prev => [...prev, { id, name: cleanName, initials, tone: palette[prev.length % palette.length], username: cleanUsername, password: cleanPassword,
       nutritionEnabled: false, profile: { weight: 65, height: 172, age: 25, sex: form.sex, goal: "perf" }, diet: [],
       hormonalTrackingEnabled: false, cycleInfo: { averageCycleLengthDays: 28, regularity: "regular", contraception: "none", isPregnantOrPostpartum: false, isPerimenopausal: false }, enabledSymptoms: { ...DEFAULT_ENABLED_SYMPTOMS } }]);
-    sheetsPost({ action: "createAthlete", athleteId: id, name: form.name, username: form.username, password: form.password });
+    sheetsPost({ action: "createAthlete", athleteId: id, name: cleanName, username: cleanUsername, password: cleanPassword });
     setForm({ name: "", username: "", password: "", sex: "f" }); setError("");
   }
   function toggleNutrition(id) {
@@ -2905,7 +2907,7 @@ export default function BioSyncApp() {
           const initials = (r.name || "").split(" ").map(w => w[0]).slice(0, 2).join("").toUpperCase();
           return {
             id: r.athleteId, name: r.name, initials, tone: palette[(prev.length + i) % palette.length],
-            username: r.username || "", password: r.password || "",
+            username: String(r.username || ""), password: String(r.password || ""),
             nutritionEnabled: !!r.nutritionEnabled,
             profile: { weight: 65, height: 172, age: 25, sex: r.sex || "f", goal: "perf" }, diet: [],
             hormonalTrackingEnabled: !!r.hormonalTrackingEnabled,
