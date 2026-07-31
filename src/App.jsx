@@ -1430,7 +1430,7 @@ function AthleteManager({ athletes, setAthletes, t }) {
     setAthletes(prev => [...prev, { id, name: form.name, initials, tone: palette[prev.length % palette.length], username: form.username, password: form.password,
       nutritionEnabled: false, profile: { weight: 65, height: 172, age: 25, sex: form.sex, goal: "perf" }, diet: [],
       hormonalTrackingEnabled: false, cycleInfo: { averageCycleLengthDays: 28, regularity: "regular", contraception: "none", isPregnantOrPostpartum: false, isPerimenopausal: false }, enabledSymptoms: { ...DEFAULT_ENABLED_SYMPTOMS } }]);
-    sheetsPost({ action: "createAthlete", athleteId: id, name: form.name });
+    sheetsPost({ action: "createAthlete", athleteId: id, name: form.name, username: form.username, password: form.password });
     setForm({ name: "", username: "", password: "", sex: "f" }); setError("");
   }
   function toggleNutrition(id) {
@@ -2888,6 +2888,35 @@ export default function BioSyncApp() {
     if (data.cycleCheckins) setCycleCheckins(prev => ({ ...prev, [athleteId]: { ...(prev[athleteId] || {}), ...data.cycleCheckins } }));
     if (data.messages) setMessages(prev => ({ ...prev, [athleteId]: data.messages.length ? data.messages.map(m => ({ id: uid(), from: m.from, text: m.text, time: m.time })) : (prev[athleteId] || []) }));
   }
+
+  // Recharge la liste complète des athlètes déjà enregistrés côté Google
+  // Sheets au démarrage de l'app. Sans ça, seuls les athlètes de démo codés
+  // en dur dans ATHLETES_SEED sont visibles : un athlète ajouté par le coach
+  // "disparaît" après une reconnexion alors qu'il existe bien dans Drive,
+  // car son Sheet n'était simplement jamais relu.
+  useEffect(() => {
+    (async () => {
+      const list = await sheetsGet({ action: "listAthletes" });
+      if (!list || list.error || !Array.isArray(list)) return;
+      setAthletes(prev => {
+        const existingIds = new Set(prev.map(a => a.id));
+        const palette = [ACCENT, AMBER, BLUE, "#C68CFF", "#F06FA0"];
+        const newOnes = list.filter(r => r.athleteId && !existingIds.has(r.athleteId)).map((r, i) => {
+          const initials = (r.name || "").split(" ").map(w => w[0]).slice(0, 2).join("").toUpperCase();
+          return {
+            id: r.athleteId, name: r.name, initials, tone: palette[(prev.length + i) % palette.length],
+            username: r.username || "", password: r.password || "",
+            nutritionEnabled: !!r.nutritionEnabled,
+            profile: { weight: 65, height: 172, age: 25, sex: r.sex || "f", goal: "perf" }, diet: [],
+            hormonalTrackingEnabled: !!r.hormonalTrackingEnabled,
+            cycleInfo: { averageCycleLengthDays: 28, regularity: "regular", contraception: "none", isPregnantOrPostpartum: false, isPerimenopausal: false },
+            enabledSymptoms: { ...DEFAULT_ENABLED_SYMPTOMS },
+          };
+        });
+        return newOnes.length ? [...prev, ...newOnes] : prev;
+      });
+    })();
+  }, []);
 
   useEffect(() => {
     if (user?.role === "athlete") loadAthleteData(user.athleteId);
