@@ -7,6 +7,11 @@ import {
   Timer, Bell, Pencil, Image as ImageIcon, Film, Globe, Apple, Flame, Salad, ChevronDown,
   TrendingUp, TrendingDown, Minus, Info, AlertTriangle, ChevronUp, LineChart as LineChartIcon, Wind,
 } from "lucide-react";
+import { computeCMJReport } from "./cmj/cmjEngine.js";
+import { CMJ_DICT } from "./cmj/cmjI18n.js";
+import NeuromuscularCard from "./cmj/NeuromuscularCard.jsx";
+import CMJTestScreen from "./cmj/CMJTestScreen.jsx";
+
 
 // ============================================================
 // Tokens
@@ -403,6 +408,7 @@ const DICT = {
     nutrition_history: "Historial",
   },
 };
+Object.keys(CMJ_DICT).forEach((l) => Object.assign(DICT[l], CMJ_DICT[l]));
 function useT(lang) { return (key) => DICT[lang]?.[key] ?? DICT.fr[key] ?? key; }
 
 // ============================================================================
@@ -1938,8 +1944,9 @@ function statsFromSeries(values) {
 // 3 niveaux : Décision / Déterminants / Analyse avancée — voir workload/
 // pour le moteur de calcul (aucune dépendance à un ratio ACWR).
 // ============================================================
-function RecoveryDashboard({ checkins, debriefs, sessions, cycleCheckins, athlete, athleteId, t, lang }) {
+function RecoveryDashboard({ checkins, debriefs, sessions, cycleCheckins, athlete, athleteId, cmjHistory, setCmjHistory, t, lang }) {
   const [showAnalysis, setShowAnalysis] = useState(false);
+  const [showCMJTest, setShowCMJTest] = useState(false);
   const [showHormonalDetail, setShowHormonalDetail] = useState(false);
   const [chronicWindow, setChronicWindow] = useState(28);
 
@@ -1952,6 +1959,9 @@ function RecoveryDashboard({ checkins, debriefs, sessions, cycleCheckins, athlet
   const previous = prevKey ? athCheckins[prevKey] : null;
 
   if (!latest) return <div style={{ color: MUTED2, fontSize: 13, textAlign: "center", padding: "30px 0" }}>{t("no_data")}</div>;
+  if (showCMJTest) {
+    return <CMJTestScreen athleteId={athleteId} setCmjHistory={setCmjHistory} onDone={() => setShowCMJTest(false)} t={t} />;
+  }
 
   // ---- Historique de charge (35 jours, zéro-rempli) ----
   const dailyLoads = buildDailyLoadSeries(athDebriefs, 35, latestKey);
@@ -1980,6 +1990,14 @@ function RecoveryDashboard({ checkins, debriefs, sessions, cycleCheckins, athlet
     yesterdayRPE: lastDebrief ? lastDebrief.rpe : null,
     hasAcuteFlareUp: lastDebrief ? (lastDebrief.sensations || []).includes("acute_pain") : false,
   }, { chronicConfig: { timeConstantDays: chronicWindow } });
+  const cmjReport = computeCMJReport(cmjHistory[athleteId] || {}, TODAY, {
+    hrv: { today: latest.vfcNuit, individualMean: vfcStats.mean || latest.vfcNuit, individualSd: vfcStats.sd },
+    restingHeartRate: { today: latest.fcRepos, individualMean: rhrStats.mean || latest.fcRepos, individualSd: rhrStats.sd },
+    nightTemperatureDeltaC,
+    sleepHours: latest.sleepHours,
+    loadDeltaPercent: snapshot.loadDeltaPercent,
+    pain: lastDebrief ? lastDebrief.painIntensity : null,
+  });
 
   const scoreTone = RISK_TONE[readiness.riskLevel];
 
@@ -2110,7 +2128,8 @@ function RecoveryDashboard({ checkins, debriefs, sessions, cycleCheckins, athlet
           </div>
         );
       })()}
-
+      <NeuromuscularCard report={cmjReport} t={t} onRunTest={() => setShowCMJTest(true)} />
+      
       {/* ---------------- TIER 2 — DÉTERMINANTS ---------------- */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10 }}>
         <DeterminantCard icon={Gauge} label={t("acute_load_label")} value={Math.round(snapshot.acuteLoad7d)}
@@ -2968,6 +2987,7 @@ function CoachInbox({ athletes, checkins, debriefs, activeId, setActiveId, t, la
 // ============================================================
 // ROOT APP
 // ============================================================
+export { BG, SURFACE, BORDER, INK, MUTED, MUTED2, ACCENT, AMBER, RED, BLUE, TONE, inputStyle, btnPrimary, btnGhost, btnDanger, Card, MetricCard, Badge, uid, TODAY, saveCMJResult };
 export default function BioSyncApp() {
   const [lang, setLang] = useState("fr");
   const t = useT(lang);
@@ -3096,7 +3116,7 @@ export default function BioSyncApp() {
         </>}
         {coachTab === "dashboard" && <>
           <AthletePicker athletes={athletes} activeId={coachActiveAthlete} setActiveId={setCoachActiveAthlete} t={t} />
-          {coachActiveAthlete && <RecoveryDashboard checkins={checkins} debriefs={debriefs} sessions={sessions} cycleCheckins={cycleCheckins} athlete={activeAthleteObj} athleteId={coachActiveAthlete} t={t} lang={lang} />}
+          {coachActiveAthlete && <RecoveryDashboard checkins={checkins} debriefs={debriefs} sessions={sessions} cycleCheckins={cycleCheckins} athlete={activeAthleteObj} athleteId={coachActiveAthlete} cmjHistory={cmjHistory} setCmjHistory={setCmjHistory} t={t} lang={lang} />}
         </>}
         {coachTab === "nutrition" && <>
           <AthletePicker athletes={athletes} activeId={coachActiveAthlete} setActiveId={setCoachActiveAthlete} t={t} />
@@ -3127,7 +3147,7 @@ export default function BioSyncApp() {
       )}
       {athleteTab === "checkin" && <CheckinForm checkins={checkins} setCheckins={setCheckins} athleteId={user.athleteId} notify={notifyCoachEvent} t={t} />}
       {athleteTab === "debrief" && <DebriefForm debriefs={debriefs} setDebriefs={setDebriefs} athleteId={user.athleteId} target={debriefTarget} onDone={() => setDebriefTarget(null)} notify={notifyCoachEvent} t={t} lang={lang} />}
-      {athleteTab === "dashboard" && <RecoveryDashboard checkins={checkins} debriefs={debriefs} sessions={sessions} cycleCheckins={cycleCheckins} athlete={me} athleteId={user.athleteId} t={t} lang={lang} />}
+      {athleteTab === "dashboard" && <RecoveryDashboard checkins={checkins} debriefs={debriefs} sessions={sessions} cycleCheckins={cycleCheckins} athlete={me} athleteId={user.athleteId} cmjHistory={cmjHistory} setCmjHistory={setCmjHistory} t={t} lang={lang} />}
       {athleteTab === "nutrition" && me?.nutritionEnabled && <NutritionGate athlete={me} setAthletes={setAthletes} sessions={sessions} debriefs={debriefs} nutritionHistory={nutritionHistory} setNutritionHistory={setNutritionHistory} t={t} lang={lang} />}
       {athleteTab === "cycle" && me?.hormonalTrackingEnabled && <CycleCheckinForm athlete={me} setAthletes={setAthletes} cycleCheckins={cycleCheckins} setCycleCheckins={setCycleCheckins} athleteId={user.athleteId} t={t} />}
       {athleteTab === "messages" && <Messages messages={messages} setMessages={setMessages} athletes={athletes} activeId={user.athleteId} setActiveId={() => {}} role="athlete" notify={notifyMessage} t={t} />}
