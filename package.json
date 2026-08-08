@@ -6,13 +6,15 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:cmj": "node src/cmj/cmjEngine.test.js && node src/cmj/jumpDetector.test.js && node src/cmj/qualityControl.test.js"
   },
   "dependencies": {
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "recharts": "^2.12.7",
-    "lucide-react": "^0.383.0"
+    "lucide-react": "^0.383.0",
+    "@mediapipe/tasks-vision": "^1.0.1"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.1",
