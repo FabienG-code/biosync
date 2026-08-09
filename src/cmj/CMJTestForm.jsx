@@ -9,7 +9,8 @@
 // ============================================================================
 import React, { useState } from "react";
 import { Send, CheckCircle2 } from "lucide-react";
-import { SURFACE, BORDER, MUTED, MUTED2, ACCENT, AMBER, inputStyle, btnPrimary, btnGhost, Card, TODAY, saveCMJResult } from "../App.jsx";
+import { SURFACE, BORDER, MUTED, MUTED2, ACCENT, AMBER } from "../theme.js";
+import { inputStyle, btnPrimary, btnGhost, Card, TODAY, saveCMJResult } from "../App.jsx";
 import { summarizeJumps, CMJ_ALGORITHM_VERSION } from "./cmjEngine.js";
 
 const JUMP_COUNT = 3;
