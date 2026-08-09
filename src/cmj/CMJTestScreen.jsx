@@ -167,19 +167,6 @@ export default function CMJTestScreen({ athleteId, setCmjHistory, onDone, t }) {
     return <CMJTestForm athleteId={athleteId} setCmjHistory={setCmjHistory} onDone={onDone} t={t} />;
   }
 
-  const videoBlock = (
-    <video
-      ref={videoRef}
-      playsInline
-      muted
-      style={{
-        width: "100%", borderRadius: 14, background: "#000",
-        display: [PHASE.BASELINE, PHASE.PROMPT, PHASE.CAPTURING].includes(phase) ? "block" : "none",
-        transform: "scaleX(-1)", // effet miroir, plus naturel en caméra frontale
-      }}
-    />
-  );
-
   if (saved) {
     return (
       <Card>
@@ -192,55 +179,28 @@ export default function CMJTestScreen({ athleteId, setCmjHistory, onDone, t }) {
     );
   }
 
-  if (phase === PHASE.INTRO) {
-    return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        <Card label={t("cmj_camera_intro_title")}>
-          <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
-            <Camera size={20} color={ACCENT} style={{ flexShrink: 0, marginTop: 2 }} />
-            <div style={{ fontSize: 12.5, color: MUTED }}>{t("cmj_camera_intro_hint")}</div>
-          </div>
-        </Card>
-        <button onClick={startTest} style={btnPrimary}><Camera size={16} /> {t("cmj_start_camera_test")}</button>
-        <button onClick={() => setManualFallback(true)} style={{ ...btnGhost, justifyContent: "center", gap: 8 }}>
-          <Keyboard size={14} /> {t("cmj_switch_to_manual")}
-        </button>
-        {onDone && <button onClick={onDone} style={{ ...btnGhost, justifyContent: "center" }}>{t("cancel")}</button>}
-      </div>
-    );
-  }
+  // Le <video> doit être monté dans le DOM dès le TOUT PREMIER rendu (phase
+  // INTRO comprise), sinon `videoRef.current` vaut encore null au moment où
+  // startTest() appelle startCamera() pendant la phase LOADING — c'était
+  // exactement la cause du crash "e.srcObject=r" (e = null). On le garde
+  // donc toujours dans l'arbre JSX, simplement masqué via CSS `display`
+  // selon la phase, plutôt que conditionnellement absent du DOM.
+  const showVideo = [PHASE.BASELINE, PHASE.PROMPT, PHASE.CAPTURING].includes(phase);
 
-  if (phase === PHASE.CAMERA_ERROR) {
-    return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        <div style={{ background: `${RED}14`, border: `1px solid ${RED}44`, borderRadius: 10, padding: "10px 12px", display: "flex", gap: 8, alignItems: "flex-start" }}>
-          <AlertTriangle size={16} color={RED} style={{ flexShrink: 0, marginTop: 1 }} />
-          <div style={{ fontSize: 11.5, color: MUTED }}>
-            {t("cmj_camera_error")}
-            {errorMessage && <div style={{ fontSize: 10, color: MUTED2, marginTop: 4 }}>{errorMessage}</div>}
-          </div>
-        </div>
-        <button onClick={() => setManualFallback(true)} style={btnPrimary}><Keyboard size={16} /> {t("cmj_switch_to_manual")}</button>
-      </div>
-    );
-  }
-
-  if (phase === PHASE.LOADING) {
-    return (
-      <Card>
-        <div style={{ textAlign: "center", padding: "20px 0", fontSize: 12.5, color: MUTED }}>{t("cmj_loading_model")}</div>
-      </Card>
-    );
-  }
-
-  if ([PHASE.BASELINE, PHASE.PROMPT, PHASE.CAPTURING].includes(phase)) {
-    return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <div style={{ fontSize: 11.5, color: MUTED, textAlign: "center" }}>
-          {t("cmj_attempt_n_of_m").replace("{n}", attempts.length + 1).replace("{m}", REQUIRED_JUMPS)}
-        </div>
-        <div style={{ position: "relative" }}>
-          {videoBlock}
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ position: "relative" }}>
+        <video
+          ref={videoRef}
+          playsInline
+          muted
+          style={{
+            width: "100%", borderRadius: 14, background: "#000",
+            display: showVideo ? "block" : "none",
+            transform: "scaleX(-1)", // effet miroir, plus naturel en caméra frontale
+          }}
+        />
+        {showVideo && (
           <div style={{
             position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center",
             pointerEvents: "none",
@@ -259,80 +219,118 @@ export default function CMJTestScreen({ athleteId, setCmjHistory, onDone, t }) {
               </span>
             )}
           </div>
-        </div>
+        )}
       </div>
-    );
-  }
 
-  if (phase === PHASE.ATTEMPT_RESULT) {
-    const detected = lastResult?.detected;
-    const quality = lastResult?.quality;
-    const tone = !detected ? RED : quality === "valid" ? ACCENT : AMBER;
-
-    return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        <div style={{ fontSize: 11.5, color: MUTED, textAlign: "center" }}>
-          {t("cmj_attempt_n_of_m").replace("{n}", attempts.length || 1).replace("{m}", REQUIRED_JUMPS)}
-        </div>
-        <div style={{ background: `linear-gradient(135deg, ${tone}14, ${SURFACE})`, border: `1px solid ${tone}55`, borderRadius: 14, padding: 18, textAlign: "center" }}>
-          {detected ? (
-            <>
-              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 34, fontWeight: 700, color: tone }}>{lastResult.heightCm}</div>
-              <div style={{ fontSize: 12, color: MUTED, marginBottom: 8 }}>cm</div>
-              <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: `${tone}18`, border: `1px solid ${tone}55`, borderRadius: 999, padding: "4px 11px" }}>
-                <span style={{ width: 6, height: 6, borderRadius: 3, background: tone }} />
-                <span style={{ fontSize: 11.5, color: tone, fontFamily: "'Space Grotesk', sans-serif", fontWeight: 600 }}>
-                  {quality === "valid" ? t("cmj_quality_valid") : t("cmj_quality_low_confidence")}
-                </span>
-              </div>
-              {lastResult.reason && (
-                <div style={{ fontSize: 11, color: MUTED, marginTop: 10 }}>{t(`cmj_reason_${lastResult.reason}`)}</div>
-              )}
-            </>
-          ) : (
-            <>
-              <AlertTriangle size={22} color={RED} style={{ marginBottom: 8 }} />
-              <div style={{ fontSize: 12.5, color: MUTED }}>{t(`cmj_reason_${lastResult?.reason || "no_liftoff_detected"}`)}</div>
-            </>
-          )}
-        </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={runAttempt} style={{ ...btnGhost, flex: 1, justifyContent: "center" }}>
-            <RotateCcw size={14} /> {t("cmj_retry_attempt")}
+      {phase === PHASE.INTRO && (
+        <>
+          <Card label={t("cmj_camera_intro_title")}>
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+              <Camera size={20} color={ACCENT} style={{ flexShrink: 0, marginTop: 2 }} />
+              <div style={{ fontSize: 12.5, color: MUTED }}>{t("cmj_camera_intro_hint")}</div>
+            </div>
+          </Card>
+          <button onClick={startTest} style={btnPrimary}><Camera size={16} /> {t("cmj_start_camera_test")}</button>
+          <button onClick={() => setManualFallback(true)} style={{ ...btnGhost, justifyContent: "center", gap: 8 }}>
+            <Keyboard size={14} /> {t("cmj_switch_to_manual")}
           </button>
-          <button onClick={nextStep} style={{ ...btnPrimary, flex: 1.4 }} disabled={!detected && attempts.length === 0}>
-            <ChevronRight size={16} /> {attempts.length >= REQUIRED_JUMPS ? t("cmj_review_summary") : t("cmj_next_attempt")}
-          </button>
-        </div>
-      </div>
-    );
-  }
+          {onDone && <button onClick={onDone} style={{ ...btnGhost, justifyContent: "center" }}>{t("cancel")}</button>}
+        </>
+      )}
 
-  if (phase === PHASE.SUMMARY) {
-    const jumps = attempts.map(toJumpModel).filter(Boolean);
-    const summary = summarizeJumps(jumps);
-    return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        <Card label={t("cmj_summary_title")}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {attempts.map((a, i) => (
-              <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, color: MUTED }}>
-                <span>{t("cmj_attempt_n_of_m").replace("{n}", i + 1).replace("{m}", attempts.length)}</span>
-                <b style={{ color: a.quality === "valid" ? INK : MUTED2, fontFamily: "'JetBrains Mono', monospace" }}>
-                  {a.heightCm} cm {a.quality !== "valid" ? `· ${t("cmj_quality_low_confidence")}` : ""}
-                </b>
-              </div>
-            ))}
+      {phase === PHASE.CAMERA_ERROR && (
+        <>
+          <div style={{ background: `${RED}14`, border: `1px solid ${RED}44`, borderRadius: 10, padding: "10px 12px", display: "flex", gap: 8, alignItems: "flex-start" }}>
+            <AlertTriangle size={16} color={RED} style={{ flexShrink: 0, marginTop: 1 }} />
+            <div style={{ fontSize: 11.5, color: MUTED }}>
+              {t("cmj_camera_error")}
+              {errorMessage && <div style={{ fontSize: 10, color: MUTED2, marginTop: 4 }}>{errorMessage}</div>}
+            </div>
           </div>
-          <div style={{ borderTop: `1px solid ${BORDER}`, marginTop: 10, paddingTop: 10, display: "flex", justifyContent: "space-between" }}>
-            <span style={{ fontSize: 12.5, color: MUTED }}>{t("cmj_today_height")}</span>
-            <b style={{ fontFamily: "'JetBrains Mono', monospace", color: ACCENT, fontSize: 15 }}>{summary.bestHeightCm ?? "—"} cm</b>
-          </div>
+          <button onClick={() => setManualFallback(true)} style={btnPrimary}><Keyboard size={16} /> {t("cmj_switch_to_manual")}</button>
+        </>
+      )}
+
+      {phase === PHASE.LOADING && (
+        <Card>
+          <div style={{ textAlign: "center", padding: "20px 0", fontSize: 12.5, color: MUTED }}>{t("cmj_loading_model")}</div>
         </Card>
-        <button onClick={saveTest} style={btnPrimary}><Send size={16} /> {t("cmj_save_test")}</button>
-      </div>
-    );
-  }
+      )}
 
-  return null;
+      {showVideo && (
+        <div style={{ fontSize: 11.5, color: MUTED, textAlign: "center" }}>
+          {t("cmj_attempt_n_of_m").replace("{n}", attempts.length + 1).replace("{m}", REQUIRED_JUMPS)}
+        </div>
+      )}
+
+      {phase === PHASE.ATTEMPT_RESULT && (() => {
+        const detected = lastResult?.detected;
+        const quality = lastResult?.quality;
+        const tone = !detected ? RED : quality === "valid" ? ACCENT : AMBER;
+        return (
+          <>
+            <div style={{ fontSize: 11.5, color: MUTED, textAlign: "center" }}>
+              {t("cmj_attempt_n_of_m").replace("{n}", attempts.length || 1).replace("{m}", REQUIRED_JUMPS)}
+            </div>
+            <div style={{ background: `linear-gradient(135deg, ${tone}14, ${SURFACE})`, border: `1px solid ${tone}55`, borderRadius: 14, padding: 18, textAlign: "center" }}>
+              {detected ? (
+                <>
+                  <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 34, fontWeight: 700, color: tone }}>{lastResult.heightCm}</div>
+                  <div style={{ fontSize: 12, color: MUTED, marginBottom: 8 }}>cm</div>
+                  <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: `${tone}18`, border: `1px solid ${tone}55`, borderRadius: 999, padding: "4px 11px" }}>
+                    <span style={{ width: 6, height: 6, borderRadius: 3, background: tone }} />
+                    <span style={{ fontSize: 11.5, color: tone, fontFamily: "'Space Grotesk', sans-serif", fontWeight: 600 }}>
+                      {quality === "valid" ? t("cmj_quality_valid") : t("cmj_quality_low_confidence")}
+                    </span>
+                  </div>
+                  {lastResult.reason && (
+                    <div style={{ fontSize: 11, color: MUTED, marginTop: 10 }}>{t(`cmj_reason_${lastResult.reason}`)}</div>
+                  )}
+                </>
+              ) : (
+                <>
+                  <AlertTriangle size={22} color={RED} style={{ marginBottom: 8 }} />
+                  <div style={{ fontSize: 12.5, color: MUTED }}>{t(`cmj_reason_${lastResult?.reason || "no_liftoff_detected"}`)}</div>
+                </>
+              )}
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={runAttempt} style={{ ...btnGhost, flex: 1, justifyContent: "center" }}>
+                <RotateCcw size={14} /> {t("cmj_retry_attempt")}
+              </button>
+              <button onClick={nextStep} style={{ ...btnPrimary, flex: 1.4 }} disabled={!detected && attempts.length === 0}>
+                <ChevronRight size={16} /> {attempts.length >= REQUIRED_JUMPS ? t("cmj_review_summary") : t("cmj_next_attempt")}
+              </button>
+            </div>
+          </>
+        );
+      })()}
+
+      {phase === PHASE.SUMMARY && (() => {
+        const jumps = attempts.map(toJumpModel).filter(Boolean);
+        const summary = summarizeJumps(jumps);
+        return (
+          <>
+            <Card label={t("cmj_summary_title")}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {attempts.map((a, i) => (
+                  <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, color: MUTED }}>
+                    <span>{t("cmj_attempt_n_of_m").replace("{n}", i + 1).replace("{m}", attempts.length)}</span>
+                    <b style={{ color: a.quality === "valid" ? INK : MUTED2, fontFamily: "'JetBrains Mono', monospace" }}>
+                      {a.heightCm} cm {a.quality !== "valid" ? `· ${t("cmj_quality_low_confidence")}` : ""}
+                    </b>
+                  </div>
+                ))}
+              </div>
+              <div style={{ borderTop: `1px solid ${BORDER}`, marginTop: 10, paddingTop: 10, display: "flex", justifyContent: "space-between" }}>
+                <span style={{ fontSize: 12.5, color: MUTED }}>{t("cmj_today_height")}</span>
+                <b style={{ fontFamily: "'JetBrains Mono', monospace", color: ACCENT, fontSize: 15 }}>{summary.bestHeightCm ?? "—"} cm</b>
+              </div>
+            </Card>
+            <button onClick={saveTest} style={btnPrimary}><Send size={16} /> {t("cmj_save_test")}</button>
+          </>
+        );
+      })()}
+    </div>
+  );
 }
