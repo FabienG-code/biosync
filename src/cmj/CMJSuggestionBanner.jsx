@@ -12,7 +12,7 @@
 // ============================================================================
 import React from "react";
 import { Activity, ChevronRight } from "lucide-react";
-import { AMBER, MUTED } from "../App.jsx";
+import { AMBER, MUTED } from "../theme.js";
 
 export default function CMJSuggestionBanner({ onOpen, t, label }) {
   return (
