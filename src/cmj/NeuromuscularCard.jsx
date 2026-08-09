@@ -9,7 +9,7 @@
 // ============================================================================
 import React, { useState } from "react";
 import { Activity, ChevronDown, TrendingUp, TrendingDown, Minus } from "lucide-react";
-import { BG, SURFACE, BORDER, INK, MUTED, MUTED2, ACCENT, AMBER, RED } from "../App.jsx";
+import { BG, SURFACE, BORDER, INK, MUTED, MUTED2, ACCENT, AMBER, RED } from "../theme.js";
 import { CMJ_TREND } from "./cmjEngine.js";
 
 const CMJ_LEVEL_TONE = {
