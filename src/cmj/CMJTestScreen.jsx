@@ -22,7 +22,8 @@
 // ============================================================================
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { Camera, CheckCircle2, Send, AlertTriangle, Keyboard, RotateCcw, ChevronRight } from "lucide-react";
-import { SURFACE, BORDER, INK, MUTED, MUTED2, ACCENT, AMBER, RED, btnPrimary, btnGhost, Card, TODAY, saveCMJResult } from "../App.jsx";
+import { SURFACE, BORDER, INK, MUTED, MUTED2, ACCENT, AMBER, RED } from "../theme.js";
+import { btnPrimary, btnGhost, Card, TODAY, saveCMJResult } from "../App.jsx";
 import { summarizeJumps, CMJ_ALGORITHM_VERSION } from "./cmjEngine.js";
 import { analyzeJumpAttempt, toJumpModel } from "./jumpDetector.js";
 import { applyQualityControl } from "./qualityControl.js";
