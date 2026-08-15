@@ -1,20 +1,18 @@
 // ============================================================================
 // morning/morningCheckinPersistence.js — BioSync
 // ----------------------------------------------------------------------------
-// Phase 6 : transforme la sortie de MorningCheckinFlow.onComplete() (objets
-// imbriqués : report orthostatique, statut autonome, questionnaire, CMJ...)
-// en un payload plat prêt à être envoyé à saveMorningCheckin() côté backend
-// — même rôle que buildDailyLoadSeries/computeWorkloadSnapshot pour le
-// Workload Engine : une fonction pure entre le moteur et la couche réseau.
-//
-// Logique pure — testable avec `node morning/morningCheckinPersistence.test.js`.
+// + hooperScore (Hooper Index classique 4-28) et measurementSource
+// (bluetooth | camera_ppg | null), pour distinguer la technologie utilisée
+// dans l'historique (§10/§16 cahier des charges caméra).
 // ============================================================================
 import { computeMeasurementConfidence } from "./confidenceScore.js";
+import { computeHooperScore } from "./recoveryEngine.js";
 
 export function buildMorningCheckinPayload(fullResult) {
   const { tier, orthostatic, questionnaire, cmj, recoveryStatus, recoveryRecommendation, fatigueProfile } = fullResult || {};
   const report = orthostatic?.report ?? null;
   const autonomicStatus = orthostatic?.autonomicStatus ?? null;
+  const measurementSource = orthostatic?.measurement?.source ?? null;
 
   const confidence = computeMeasurementConfidence({
     tier,
@@ -26,6 +24,7 @@ export function buildMorningCheckinPayload(fullResult) {
 
   return {
     tier: tier ?? null,
+    measurementSource,
     restingHR: report?.restingHR ?? null,
     standingHR: report?.standingHR ?? null,
     deltaHR: report?.deltaHR ?? null,
@@ -38,21 +37,26 @@ export function buildMorningCheckinPayload(fullResult) {
     orthostaticResponseIndex: report?.orthostaticResponseIndex ?? null,
     sympatheticActivationIndex: report?.sympatheticActivationIndex ?? null,
     parasympatheticRecoveryIndex: report?.parasympatheticRecoveryIndex ?? null,
+    heartRateAt1Min: orthostatic?.measurement?.heartRateAt1Min ?? null,
+    heartRateAt2Min: orthostatic?.measurement?.heartRateAt2Min ?? null,
+    heartRateAt3Min: orthostatic?.measurement?.heartRateAt3Min ?? null,
     signalQualityOk: report?.signalQuality?.ok ?? null,
     autonomicScore: autonomicStatus?.score ?? null,
     autonomicLevel: autonomicStatus?.level ?? null,
     questionnaire: questionnaire
       ? {
-          sleepQuality: questionnaire.sleepQuality ?? null,
-          stress: questionnaire.stress ?? null,
-          fatigue: questionnaire.fatigue ?? null,
+          hooperSleepQuality: questionnaire.hooperSleepQuality ?? null,
+          hooperFatigue: questionnaire.hooperFatigue ?? null,
+          hooperMusclePain: questionnaire.hooperMusclePain ?? null,
+          hooperStress: questionnaire.hooperStress ?? null,
           motivation: questionnaire.motivation ?? null,
-          musclePain: questionnaire.musclePain ?? null,
           jointPain: questionnaire.jointPain ?? null,
           generalRecovery: questionnaire.generalRecovery ?? null,
         }
       : null,
+    hooperScore: computeHooperScore(questionnaire),
     sleepHours: questionnaire?.sleepHours ?? null,
+    bedtime: questionnaire?.bedtime ?? null,
     temperatureDeltaC: questionnaire?.temperatureDeltaC ?? null,
     recoveryScore: recoveryStatus?.score ?? null,
     recoveryLevel: recoveryStatus?.level ?? null,
@@ -61,7 +65,7 @@ export function buildMorningCheckinPayload(fullResult) {
     cmjHeightCm: cmj?.result?.bestHeightCm ?? null,
     cmjQuality: cmj?.result?.testQuality ?? null,
     fatigueProfile: fatigueProfile?.profile ?? null,
-    adaptiveReadinessScore: null, // branché en Phase 8 (intégration finale au Daily Decision Engine)
+    adaptiveReadinessScore: null,
     confidence,
     comments: "",
   };
