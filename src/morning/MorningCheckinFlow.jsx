@@ -1,17 +1,12 @@
 // ============================================================================
 // morning/MorningCheckinFlow.jsx
 // ----------------------------------------------------------------------------
-// Phase 4 : orchestrateur du nouveau Morning Check-in. Branche
-// CheckinTierSelector -> (OrthostaticTestScreen si Standard/Avancé) ->
-// QuestionnaireForm -> synthèse (recoveryEngine + hrvEngine.classifyFatigueProfile).
-//
-// Le niveau "Avancé" prévoit une étape CMJ après le questionnaire, pilotée
-// par le Daily Decision Engine — cette étape n'est PAS encore implémentée
-// ici (Phase 5 du plan). Le prop `cmjStep` est le point d'extension prévu :
-// s'il est fourni, MorningCheckinFlow l'utilise ; sinon le niveau Avancé se
-// comporte comme le niveau Standard (le questionnaire termine le check-in),
-// pour que ce fichier reste fonctionnel et testable dès maintenant sans
-// bloquer sur une pièce pas encore construite.
+// Ajout : après le choix de niveau Standard/Avancé, un écran de sélection
+// de méthode de mesure (Bluetooth / Caméra) s'intercale avant le test
+// orthostatique. Le Bluetooth (OrthostaticTestScreen.jsx) N'EST PAS modifié
+// dans son comportement — seul son résultat est désormais enveloppé via
+// fromBluetoothResult() pour porter la même forme `measurement` que la
+// caméra (orthostaticDataSource.js).
 // ============================================================================
 import React, { useState } from "react";
 import { CheckCircle2, ChevronRight } from "lucide-react";
@@ -20,57 +15,62 @@ import { Card, btnPrimary, btnGhost } from "../App.jsx";
 import CheckinTierSelector from "./CheckinTierSelector.jsx";
 import QuestionnaireForm from "./QuestionnaireForm.jsx";
 import OrthostaticTestScreen from "./OrthostaticTestScreen.jsx";
+import CameraOrthostaticTestScreen from "./CameraOrthostaticTestScreen.jsx";
+import MeasurementMethodSelector from "./MeasurementMethodSelector.jsx";
+import { fromBluetoothResult } from "./orthostaticDataSource.js";
 import { computeRecoveryStatus, generateRecoveryRecommendation } from "./recoveryEngine.js";
 import { classifyFatigueProfile } from "./hrvEngine.js";
 
 const STEP = {
   TIER_SELECT: "tier_select",
+  METHOD_SELECT: "method_select",
   ORTHOSTATIC: "orthostatic",
+  CAMERA_ORTHOSTATIC: "camera_orthostatic",
   QUESTIONNAIRE: "questionnaire",
-  CMJ: "cmj", // point d'extension Phase 5
+  CMJ: "cmj",
   DONE: "done",
 };
 
 const FATIGUE_PROFILE_TONE = {
-  optimal_recovery: ACCENT,
-  autonomic_fatigue: AMBER,
-  neuromuscular_fatigue: AMBER,
-  mixed_fatigue: RED,
-  systemic_fatigue: RED,
-  insufficient_data: MUTED2,
+  optimal_recovery: ACCENT, autonomic_fatigue: AMBER, neuromuscular_fatigue: AMBER,
+  mixed_fatigue: RED, systemic_fatigue: RED, insufficient_data: MUTED2,
 };
 
 export default function MorningCheckinFlow({ athleteId, onComplete, cmjStep: CmjStep, sessionType, loadDeltaPercent, adaptiveReadinessScore, cmjHistory, setCmjHistory, t, lang }) {
   const [step, setStep] = useState(STEP.TIER_SELECT);
   const [tier, setTier] = useState(null);
-  const [orthostaticResult, setOrthostaticResult] = useState(null);
+  const [orthostaticResult, setOrthostaticResult] = useState(null); // { report, autonomicStatus, recommendation, measurement }
   const [questionnaireValues, setQuestionnaireValues] = useState(null);
   const [cmjResult, setCmjResult] = useState(null);
 
   function selectTier(chosenTier) {
     setTier(chosenTier);
-    setStep(chosenTier === "quick" ? STEP.QUESTIONNAIRE : STEP.ORTHOSTATIC);
+    setStep(chosenTier === "quick" ? STEP.QUESTIONNAIRE : STEP.METHOD_SELECT);
+  }
+
+  function selectMethod(method) {
+    setStep(method === "camera" ? STEP.CAMERA_ORTHOSTATIC : STEP.ORTHOSTATIC);
   }
 
   function handleOrthostaticComplete(result) {
-    setOrthostaticResult(result);
+    setOrthostaticResult(fromBluetoothResult(result));
+    setStep(STEP.QUESTIONNAIRE);
+  }
+
+  function handleCameraOrthostaticComplete(packaged) {
+    setOrthostaticResult(packaged);
     setStep(STEP.QUESTIONNAIRE);
   }
 
   function handleOrthostaticSkip() {
-    // Repli gracieux (Bluetooth indisponible/refusé) : le check-in continue
-    // sans données orthostatiques plutôt que de bloquer l'athlète.
     setOrthostaticResult(null);
     setStep(STEP.QUESTIONNAIRE);
   }
 
   function handleQuestionnaireSubmit(values) {
     setQuestionnaireValues(values);
-    if (tier === "advanced" && CmjStep) {
-      setStep(STEP.CMJ);
-    } else {
-      setStep(STEP.DONE);
-    }
+    if (tier === "advanced" && CmjStep) setStep(STEP.CMJ);
+    else setStep(STEP.DONE);
   }
 
   function handleCmjComplete(result) {
@@ -83,8 +83,6 @@ export default function MorningCheckinFlow({ athleteId, onComplete, cmjStep: Cmj
     setStep(STEP.DONE);
   }
 
-  // ---- Synthèse — recoveryStatus doit être prêt dès l'étape CMJ (le moteur
-  // de décision en a besoin comme facteur d'entrée), pas seulement à DONE ----
   const recoveryStatus = questionnaireValues
     ? computeRecoveryStatus(questionnaireValues, questionnaireValues.sleepHours, questionnaireValues.temperatureDeltaC)
     : null;
@@ -106,17 +104,19 @@ export default function MorningCheckinFlow({ athleteId, onComplete, cmjStep: Cmj
     }
   }
 
-  if (step === STEP.TIER_SELECT) {
-    return <CheckinTierSelector onSelect={selectTier} t={t} />;
-  }
+  if (step === STEP.TIER_SELECT) return <CheckinTierSelector onSelect={selectTier} t={t} />;
+
+  if (step === STEP.METHOD_SELECT) return <MeasurementMethodSelector onSelect={selectMethod} onSkip={handleOrthostaticSkip} t={t} />;
 
   if (step === STEP.ORTHOSTATIC) {
     return <OrthostaticTestScreen athleteId={athleteId} onComplete={handleOrthostaticComplete} onSkip={handleOrthostaticSkip} t={t} lang={lang} />;
   }
 
-  if (step === STEP.QUESTIONNAIRE) {
-    return <QuestionnaireForm onSubmit={handleQuestionnaireSubmit} t={t} />;
+  if (step === STEP.CAMERA_ORTHOSTATIC) {
+    return <CameraOrthostaticTestScreen onComplete={handleCameraOrthostaticComplete} onSkip={handleOrthostaticSkip} t={t} />;
   }
+
+  if (step === STEP.QUESTIONNAIRE) return <QuestionnaireForm onSubmit={handleQuestionnaireSubmit} t={t} />;
 
   if (step === STEP.CMJ && CmjStep) {
     return (
