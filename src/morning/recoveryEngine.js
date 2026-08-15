@@ -1,16 +1,16 @@
 // ============================================================================
 // morning/recoveryEngine.js — BioSync
 // ----------------------------------------------------------------------------
-// Phase 4 : moteur pur du questionnaire matinal + température cutanée.
-// Alimente `recoveryStatus` dans classifyFatigueProfile() (hrvEngine.js),
-// aux côtés du statut autonome (orthostatique) et neuromusculaire (CMJ).
-//
-// Réutilise le même patron que tous les moteurs précédents (Workload,
-// Hormonal, CMJ, Autonomic) : direction better/worse par item -> score
-// 0-100 -> combinaison pondérée avec redistribution -> niveau qualitatif.
-// Même convention d'échelle 0-10 que les curseurs de symptômes déjà en
-// place dans App.jsx (CycleCheckinForm) — cohérence UX avec le reste de
-// l'app plutôt qu'une nouvelle échelle à apprendre pour les athlètes.
+// Moteur pur du questionnaire matinal. Deux groupes de facteurs subjectifs :
+//   - HOOPER_ITEMS : le Hooper Index classique (sommeil, fatigue, courbatures,
+//     stress), échelle 1-7, 1=meilleur état. Même items que l'ancien
+//     CheckinForm (App.jsx), pour rester comparable au score Hooper standard
+//     utilisé dans la littérature du monitoring d'entraînement (Hooper &
+//     Mackinnon, 1995).
+//   - QUESTIONNAIRE_ITEMS : 3 facteurs complémentaires (motivation, douleur
+//     articulaire, sensation générale de récupération), échelle 0-10, non
+//     couverts par le Hooper classique.
+// + durée de sommeil et température cutanée, échelles séparées.
 //
 // Aucune dépendance UI/réseau — testable avec `node morning/recoveryEngine.test.js`.
 // ============================================================================
@@ -23,50 +23,65 @@ function softPenaltyScore(absDeviation, freeZone, fullPenaltyAt) {
   return 100 * (1 - clamp(excess / span, 0, 1));
 }
 
+function scaledItemToScore(rawValue, direction, min, max) {
+  const clamped = clamp(rawValue, min, max);
+  const normalized = (clamped - min) / (max - min);
+  return direction === "worse" ? 100 - normalized * 100 : normalized * 100;
+}
+
 // ============================================================================
-// 1. Items du questionnaire subjectif (échelle 0-10, direction better/worse)
-// ----------------------------------------------------------------------------
-// Liste exacte du cahier des charges §3 : qualité du sommeil, stress,
-// fatigue, motivation, douleur musculaire, douleur articulaire, sensation
-// générale de récupération. La durée du sommeil et la température sont
-// traitées séparément (échelles différentes, cf. §2-3 plus bas).
+// 1. Hooper Index (échelle 1-7, 1 = meilleur état, tous "worse")
+// ============================================================================
+export const HOOPER_ITEMS = [
+  { key: "hooperSleepQuality", labelKey: "hooper_sommeil", hintKey: "hooper_hint_sleep_quality" },
+  { key: "hooperFatigue", labelKey: "hooper_fatigue", hintKey: "hooper_hint_fatigue" },
+  { key: "hooperMusclePain", labelKey: "hooper_courbatures", hintKey: "hooper_hint_muscle_pain" },
+  { key: "hooperStress", labelKey: "hooper_stress", hintKey: "hooper_hint_stress" },
+];
+
+export function computeHooperFactors(values, labelResolver) {
+  return HOOPER_ITEMS.filter((def) => values[def.key] != null).map((def) => ({
+    key: def.key,
+    label: labelResolver ? labelResolver(def.labelKey) : def.labelKey,
+    score: scaledItemToScore(values[def.key], "worse", 1, 7),
+  }));
+}
+
+// Score Hooper classique (somme brute 4-28, sans passer par les sous-scores
+// 0-100) — nécessite les 4 items ; renvoie null si l'un d'eux manque, pour
+// ne jamais produire un score Hooper partiel silencieusement faux.
+export function computeHooperScore(values) {
+  if (!values) return null;
+  const raw = HOOPER_ITEMS.map((def) => values[def.key]);
+  if (raw.some((v) => v == null)) return null;
+  return raw.reduce((sum, v) => sum + clamp(v, 1, 7), 0);
+}
+
+// ============================================================================
+// 2. Facteurs complémentaires (échelle 0-10)
 // ============================================================================
 export const QUESTIONNAIRE_ITEMS = [
-  { key: "sleepQuality", labelKey: "recovery_factor_sleep_quality", direction: "better" },
-  { key: "stress", labelKey: "recovery_factor_stress", direction: "worse" },
-  { key: "fatigue", labelKey: "recovery_factor_fatigue", direction: "worse" },
   { key: "motivation", labelKey: "recovery_factor_motivation", direction: "better" },
-  { key: "musclePain", labelKey: "recovery_factor_muscle_pain", direction: "worse" },
   { key: "jointPain", labelKey: "recovery_factor_joint_pain", direction: "worse" },
   { key: "generalRecovery", labelKey: "recovery_factor_general_recovery", direction: "better" },
 ];
-
-function itemToScore(rawValue, direction) {
-  const clamped = clamp(rawValue, 0, 10);
-  return direction === "worse" ? 100 - clamped * 10 : clamped * 10;
-}
 
 export function computeQuestionnaireFactors(values, labelResolver) {
   return QUESTIONNAIRE_ITEMS.filter((def) => values[def.key] != null).map((def) => ({
     key: def.key,
     label: labelResolver ? labelResolver(def.labelKey) : def.labelKey,
-    score: itemToScore(values[def.key], def.direction),
+    score: scaledItemToScore(values[def.key], def.direction, 0, 10),
   }));
 }
 
 // ============================================================================
-// 2. Durée de sommeil (heures, pas 0-10) — même formule que sleepSubscore
-//    dans le Workload Engine (App.jsx) : pénalité à l'écart de 8h idéales.
+// 3. Durée de sommeil / température cutanée
 // ============================================================================
 export function sleepDurationScore(hours) {
   if (hours == null) return null;
   return clamp(100 - Math.abs(hours - 8) * 18, 0, 100);
 }
 
-// ============================================================================
-// 3. Température cutanée (écart en °C vs référence) — même formule que
-//    temperatureSubscore dans le Workload Engine.
-// ============================================================================
 export function temperatureScore(deltaC) {
   if (deltaC == null) return null;
   return softPenaltyScore(Math.abs(deltaC), 0.2, 1.0);
@@ -74,26 +89,35 @@ export function temperatureScore(deltaC) {
 
 // ============================================================================
 // 4. Score de récupération combiné (0-100)
+// ----------------------------------------------------------------------------
+// Poids rééquilibrés pour intégrer les 4 items Hooper (0.56 au total,
+// cohérent avec leur rôle central dans le Hooper Index original) + les 3
+// items complémentaires + sommeil + température.
 // ============================================================================
 export const DEFAULT_RECOVERY_WEIGHTS = {
-  sleepQuality: 0.14,
+  hooperSleepQuality: 0.14,
+  hooperFatigue: 0.16,
+  hooperMusclePain: 0.12,
+  hooperStress: 0.14,
   sleepDuration: 0.14,
-  stress: 0.14,
-  fatigue: 0.16,
   motivation: 0.08,
-  musclePain: 0.12,
-  jointPain: 0.12,
+  jointPain: 0.08,
   generalRecovery: 0.06,
-  temperature: 0.04,
+  temperature: 0.08,
 };
 
 export function computeRecoveryStatus(questionnaireValues, sleepHours, temperatureDeltaC, weights = DEFAULT_RECOVERY_WEIGHTS, labelResolver) {
   const values = questionnaireValues || {};
   const raw = [
+    ...HOOPER_ITEMS.map((def) => ({
+      key: def.key,
+      label: labelResolver ? labelResolver(def.labelKey) : def.labelKey,
+      score: values[def.key] != null ? scaledItemToScore(values[def.key], "worse", 1, 7) : null,
+    })),
     ...QUESTIONNAIRE_ITEMS.map((def) => ({
       key: def.key,
       label: labelResolver ? labelResolver(def.labelKey) : def.labelKey,
-      score: values[def.key] != null ? itemToScore(values[def.key], def.direction) : null,
+      score: values[def.key] != null ? scaledItemToScore(values[def.key], def.direction, 0, 10) : null,
     })),
     { key: "sleepDuration", label: labelResolver ? labelResolver("recovery_factor_sleep_duration") : "recovery_factor_sleep_duration", score: sleepDurationScore(sleepHours) },
     { key: "temperature", label: labelResolver ? labelResolver("recovery_factor_temperature") : "recovery_factor_temperature", score: temperatureScore(temperatureDeltaC) },
@@ -115,7 +139,7 @@ export function computeRecoveryStatus(questionnaireValues, sleepHours, temperatu
   const level =
     score >= 80 ? "optimal" : score >= 65 ? "good" : score >= 50 ? "to_monitor" : score >= 35 ? "probable_fatigue" : "significant_fatigue";
 
-  return { score, level, subscores };
+  return { score, level, subscores, hooperScore: computeHooperScore(values) };
 }
 
 function weakestFactors(status, n = 2) {
@@ -127,7 +151,7 @@ function weakestFactors(status, n = 2) {
 }
 
 // ============================================================================
-// 5. Recommandation par règles (même forme que les autres moteurs)
+// 5. Recommandation par règles
 // ============================================================================
 export function generateRecoveryRecommendation(status) {
   if (!status) return { action: "insufficient_data", rationaleKey: "recovery_rationale_no_data", drivers: [] };
