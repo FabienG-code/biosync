@@ -1,0 +1,131 @@
+import assert from "node:assert/strict";
+import { mapMorningCheckinToLegacyCheckin } from "./legacyCheckinBridge.js";
+
+let passed = 0;
+function test(name, fn) {
+  try {
+    fn();
+    passed++;
+    console.log(`  ok  — ${name}`);
+  } catch (err) {
+    console.error(`FAIL  — ${name}`);
+    console.error(err);
+    process.exitCode = 1;
+  }
+}
+
+console.log("legacyCheckinBridge — tests\n");
+
+test("fullResult vide -> tous les champs null, ne plante pas", () => {
+  const r = mapMorningCheckinToLegacyCheckin({});
+  assert.equal(r.vfcNuit, null);
+  assert.equal(r.fcRepos, null);
+  assert.equal(r.hooper, null);
+});
+
+test("undefined -> ne plante pas", () => {
+  const r = mapMorningCheckinToLegacyCheckin(undefined);
+  assert.equal(r.vfcNuit, null);
+});
+
+test("check-in Standard complet : vfcNuit/fcRepos correctement mappés depuis le rapport orthostatique", () => {
+  const r = mapMorningCheckinToLegacyCheckin({
+    orthostatic: { report: { rmssdLying: 58, restingHR: 52 } },
+    questionnaire: { sleepHours: 7.5, sleepQuality: 8, temperatureDeltaC: 0.1 },
+  });
+  assert.equal(r.vfcNuit, 58);
+  assert.equal(r.vfcMoy, 58);
+  assert.equal(r.fcRepos, 52);
+  assert.equal(r.sleepHours, 7.5);
+  assert.equal(r.nightTemp, 0.1);
+});
+
+// ---- Fallback saisie manuelle (tier Rapide / test orthostatique sauté) ----
+test("check-in Rapide : aucun rapport orthostatique -> repli sur la saisie manuelle du questionnaire", () => {
+  const r = mapMorningCheckinToLegacyCheckin({
+    orthostatic: null,
+    questionnaire: { vfcManual: 61, fcReposManual: 47, sleepHours: 7 },
+  });
+  assert.equal(r.vfcNuit, 61);
+  assert.equal(r.vfcMoy, 61);
+  assert.equal(r.fcRepos, 47);
+});
+
+test("check-in Standard avec test orthostatique sauté (skip) -> repli sur la saisie manuelle si fournie", () => {
+  const r = mapMorningCheckinToLegacyCheckin({
+    orthostatic: null,
+    questionnaire: { vfcManual: 55, fcReposManual: 50 },
+  });
+  assert.equal(r.vfcNuit, 55);
+  assert.equal(r.fcRepos, 50);
+});
+
+test("mesure automatique disponible -> prioritaire sur la saisie manuelle même si les deux sont présentes", () => {
+  const r = mapMorningCheckinToLegacyCheckin({
+    orthostatic: { report: { rmssdLying: 58, restingHR: 52 } },
+    questionnaire: { vfcManual: 999, fcReposManual: 999 },
+  });
+  assert.equal(r.vfcNuit, 58);
+  assert.equal(r.fcRepos, 52);
+});
+
+test("ni mesure automatique ni saisie manuelle -> null (pas de valeur inventée)", () => {
+  const r = mapMorningCheckinToLegacyCheckin({
+    orthostatic: null,
+    questionnaire: { sleepHours: 7 },
+  });
+  assert.equal(r.vfcNuit, null);
+  assert.equal(r.fcRepos, null);
+});
+
+test("saisie manuelle partielle (VFC seule) -> FC repos reste null", () => {
+  const r = mapMorningCheckinToLegacyCheckin({
+    orthostatic: null,
+    questionnaire: { vfcManual: 60 },
+  });
+  assert.equal(r.vfcNuit, 60);
+  assert.equal(r.fcRepos, null);
+});
+
+test("sleepQuality rééchelonné de 0-10 vers 0-5", () => {
+  const r = mapMorningCheckinToLegacyCheckin({ questionnaire: { sleepQuality: 8 } });
+  assert.equal(r.sleepQuality, 4);
+  const r2 = mapMorningCheckinToLegacyCheckin({ questionnaire: { sleepQuality: 10 } });
+  assert.equal(r2.sleepQuality, 5);
+  const r3 = mapMorningCheckinToLegacyCheckin({ questionnaire: { sleepQuality: 0 } });
+  assert.equal(r3.sleepQuality, 0);
+});
+
+test("hooper approximatif : profil excellent -> proche de 4 (minimum)", () => {
+  const r = mapMorningCheckinToLegacyCheckin({
+    questionnaire: { fatigue: 0, stress: 0, musclePain: 0, sleepQuality: 10 },
+  });
+  assert.ok(r.hooper <= 6);
+});
+
+test("hooper approximatif : profil dégradé -> proche de 28 (maximum)", () => {
+  const r = mapMorningCheckinToLegacyCheckin({
+    questionnaire: { fatigue: 10, stress: 10, musclePain: 10, sleepQuality: 0 },
+  });
+  assert.ok(r.hooper >= 26);
+});
+
+test("hooper toujours dans la plage valide [4,28]", () => {
+  for (let i = 0; i <= 10; i++) {
+    const r = mapMorningCheckinToLegacyCheckin({ questionnaire: { fatigue: i, stress: 10 - i, musclePain: i, sleepQuality: i } });
+    assert.ok(r.hooper >= 4 && r.hooper <= 28, `hooper=${r.hooper} hors plage pour i=${i}`);
+  }
+});
+
+test("check-in Rapide (pas de test orthostatique) : hooper toujours calculable depuis le seul questionnaire", () => {
+  const r = mapMorningCheckinToLegacyCheckin({
+    orthostatic: null,
+    questionnaire: { sleepQuality: 6, stress: 4, fatigue: 3, musclePain: 1, sleepHours: 7, temperatureDeltaC: 0, vfcManual: 63, fcReposManual: 48 },
+  });
+  assert.equal(r.vfcNuit, 63);
+  assert.equal(r.fcRepos, 48);
+  assert.ok(r.hooper != null);
+  assert.equal(r.sleepHours, 7);
+});
+
+console.log(`\n${passed} test(s) passed.`);
