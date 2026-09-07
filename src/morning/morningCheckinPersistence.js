@@ -1,18 +1,28 @@
 // ============================================================================
 // morning/morningCheckinPersistence.js — BioSync
 // ----------------------------------------------------------------------------
-// + hooperScore (Hooper Index classique 4-28) et measurementSource
-// (bluetooth | camera_ppg | null), pour distinguer la technologie utilisée
-// dans l'historique (§10/§16 cahier des charges caméra).
+// Phase 6 : transforme la sortie de MorningCheckinFlow.onComplete() (objets
+// imbriqués : report orthostatique, statut autonome, questionnaire, CMJ...)
+// en un payload plat prêt à être envoyé à saveMorningCheckin() côté backend
+// — même rôle que buildDailyLoadSeries/computeWorkloadSnapshot pour le
+// Workload Engine : une fonction pure entre le moteur et la couche réseau.
+//
+// restingHR / rmssdLying : repli sur la saisie manuelle du questionnaire
+// (fcReposManual / vfcManual) quand aucun test orthostatique automatique
+// n'a eu lieu — même logique de fallback que legacyCheckinBridge.js, pour
+// que la sheet "MorningCheckin" et le Dashboard voient toujours la même
+// valeur. Code.gs (saveMorningCheckin) écrit ces deux champs tels quels
+// dans les colonnes "FC repos" / "RMSSD allongé" sans logique propre — le
+// fallback doit donc être résolu ici, avant l'envoi.
+//
+// Logique pure — testable avec `node morning/morningCheckinPersistence.test.js`.
 // ============================================================================
 import { computeMeasurementConfidence } from "./confidenceScore.js";
-import { computeHooperScore } from "./recoveryEngine.js";
 
 export function buildMorningCheckinPayload(fullResult) {
   const { tier, orthostatic, questionnaire, cmj, recoveryStatus, recoveryRecommendation, fatigueProfile } = fullResult || {};
   const report = orthostatic?.report ?? null;
   const autonomicStatus = orthostatic?.autonomicStatus ?? null;
-  const measurementSource = orthostatic?.measurement?.source ?? null;
 
   const confidence = computeMeasurementConfidence({
     tier,
@@ -24,11 +34,10 @@ export function buildMorningCheckinPayload(fullResult) {
 
   return {
     tier: tier ?? null,
-    measurementSource,
-    restingHR: report?.restingHR ?? null,
+    restingHR: report?.restingHR ?? questionnaire?.fcReposManual ?? null,
     standingHR: report?.standingHR ?? null,
     deltaHR: report?.deltaHR ?? null,
-    rmssdLying: report?.rmssdLying ?? null,
+    rmssdLying: report?.rmssdLying ?? questionnaire?.vfcManual ?? null,
     rmssdStanding: report?.rmssdStanding ?? null,
     sdnnLying: report?.sdnnLying ?? null,
     sdnnStanding: report?.sdnnStanding ?? null,
@@ -37,24 +46,22 @@ export function buildMorningCheckinPayload(fullResult) {
     orthostaticResponseIndex: report?.orthostaticResponseIndex ?? null,
     sympatheticActivationIndex: report?.sympatheticActivationIndex ?? null,
     parasympatheticRecoveryIndex: report?.parasympatheticRecoveryIndex ?? null,
-    heartRateAt1Min: orthostatic?.measurement?.heartRateAt1Min ?? null,
-    heartRateAt2Min: orthostatic?.measurement?.heartRateAt2Min ?? null,
-    heartRateAt3Min: orthostatic?.measurement?.heartRateAt3Min ?? null,
     signalQualityOk: report?.signalQuality?.ok ?? null,
     autonomicScore: autonomicStatus?.score ?? null,
     autonomicLevel: autonomicStatus?.level ?? null,
     questionnaire: questionnaire
       ? {
-          hooperSleepQuality: questionnaire.hooperSleepQuality ?? null,
-          hooperFatigue: questionnaire.hooperFatigue ?? null,
-          hooperMusclePain: questionnaire.hooperMusclePain ?? null,
-          hooperStress: questionnaire.hooperStress ?? null,
+          sleepQuality: questionnaire.sleepQuality ?? null,
+          stress: questionnaire.stress ?? null,
+          fatigue: questionnaire.fatigue ?? null,
           motivation: questionnaire.motivation ?? null,
+          musclePain: questionnaire.musclePain ?? null,
           jointPain: questionnaire.jointPain ?? null,
           generalRecovery: questionnaire.generalRecovery ?? null,
+          vfcManual: questionnaire.vfcManual ?? null,
+          fcReposManual: questionnaire.fcReposManual ?? null,
         }
       : null,
-    hooperScore: computeHooperScore(questionnaire),
     sleepHours: questionnaire?.sleepHours ?? null,
     bedtime: questionnaire?.bedtime ?? null,
     temperatureDeltaC: questionnaire?.temperatureDeltaC ?? null,
@@ -65,7 +72,7 @@ export function buildMorningCheckinPayload(fullResult) {
     cmjHeightCm: cmj?.result?.bestHeightCm ?? null,
     cmjQuality: cmj?.result?.testQuality ?? null,
     fatigueProfile: fatigueProfile?.profile ?? null,
-    adaptiveReadinessScore: null,
+    adaptiveReadinessScore: null, // branché en Phase 8 (intégration finale au Daily Decision Engine)
     confidence,
     comments: "",
   };
