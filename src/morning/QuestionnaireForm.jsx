@@ -1,40 +1,54 @@
 // ============================================================================
 // morning/QuestionnaireForm.jsx
 // ----------------------------------------------------------------------------
-// Section "Hooper" (4 items, échelle 1-7, cf. Hooper Index classique) +
-// section "Autres facteurs" (motivation, douleur articulaire, récupération
-// générale, échelle 0-10) + durée de sommeil + température cutanée.
+// Phase 4 : formulaire du questionnaire matinal. Curseurs 0-10, même
+// convention UX que les symptômes du Hormonal Engine déjà en place dans
+// App.jsx (CycleCheckinForm) — cohérence avec le reste de l'app plutôt
+// qu'une nouvelle échelle à apprendre pour les athlètes.
+//
+// Champs VFC nuit / FC repos en saisie manuelle (fallback) : couvrent le
+// tier "Rapide" (aucun test orthostatique BLE) ET le cas où le test a été
+// sauté/refusé en Standard/Avancé. Sans eux, le Tier 1 "Décision" du
+// Workload Engine perdait deux signaux fortement pondérés (cf.
+// legacyCheckinBridge.js). Masqués automatiquement dès qu'une mesure
+// automatique existe déjà (hasAutoHrvData), pour ne jamais imposer une
+// double saisie à l'athlète.
 // ============================================================================
 import React, { useState } from "react";
 import { Send } from "lucide-react";
 import { SURFACE, BORDER, INK, MUTED, MUTED2, ACCENT, AMBER, RED } from "../theme.js";
 import { Card, inputStyle, btnPrimary } from "../App.jsx";
-import { HOOPER_ITEMS, QUESTIONNAIRE_ITEMS } from "./recoveryEngine.js";
+import { QUESTIONNAIRE_ITEMS } from "./recoveryEngine.js";
 
-export default function QuestionnaireForm({ initialValues, onSubmit, t }) {
-  const [hooperValues, setHooperValues] = useState(() => ({
-    hooperSleepQuality: 4, hooperFatigue: 4, hooperMusclePain: 4, hooperStress: 4,
-    ...(initialValues || {}),
-  }));
+export default function QuestionnaireForm({ initialValues, hasAutoHrvData, onSubmit, t }) {
   const [values, setValues] = useState(() => ({
-    motivation: 5, jointPain: 0, generalRecovery: 5,
+    sleepQuality: 5, stress: 5, fatigue: 5, motivation: 5, musclePain: 0, jointPain: 0, generalRecovery: 5,
     ...(initialValues || {}),
   }));
   const [bedtime, setBedtime] = useState(initialValues?.bedtime ?? "22:30");
   const [sleepHours, setSleepHours] = useState(initialValues?.sleepHours ?? 7.5);
   const [temperatureDeltaC, setTemperatureDeltaC] = useState(initialValues?.temperatureDeltaC ?? 0);
+  const [vfcManual, setVfcManual] = useState(initialValues?.vfcManual ?? "");
+  const [fcReposManual, setFcReposManual] = useState(initialValues?.fcReposManual ?? "");
 
-  function updateHooper(key, val) {
-    setHooperValues((prev) => ({ ...prev, [key]: val }));
-  }
   function updateItem(key, val) {
     setValues((prev) => ({ ...prev, [key]: val }));
   }
 
   function submit() {
-    onSubmit({ ...hooperValues, ...values, bedtime, sleepHours, temperatureDeltaC });
+    onSubmit({
+      ...values,
+      bedtime,
+      sleepHours,
+      temperatureDeltaC,
+      vfcManual: vfcManual === "" ? null : Number(vfcManual),
+      fcReposManual: fcReposManual === "" ? null : Number(fcReposManual),
+    });
   }
 
+  // Heure de réveil approximative, uniquement informative — la durée
+  // saisie reste la source de vérité (pas de recalcul silencieux qui
+  // écraserait une saisie manuelle plus précise).
   const wakeTimeHint = (() => {
     const [h, m] = bedtime.split(":").map(Number);
     const totalMin = h * 60 + m + Math.round(sleepHours * 60);
@@ -45,6 +59,30 @@ export default function QuestionnaireForm({ initialValues, onSubmit, t }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      {!hasAutoHrvData && (
+        <Card label={t("hrv")}>
+          <div style={{ fontSize: 10.5, color: MUTED2, marginBottom: 10 }}>{t("questionnaire_hrv_manual_hint")}</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div>
+              <div style={{ fontSize: 11, color: MUTED2, marginBottom: 4 }}>{t("vfc_night")} (ms)</div>
+              <input
+                type="number" inputMode="numeric" value={vfcManual} onChange={(e) => setVfcManual(e.target.value)}
+                placeholder="—"
+                style={{ ...inputStyle, fontFamily: "'JetBrains Mono', monospace", fontSize: 17, fontWeight: 600 }}
+              />
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: MUTED2, marginBottom: 4 }}>{t("rest_hr")} (bpm)</div>
+              <input
+                type="number" inputMode="numeric" value={fcReposManual} onChange={(e) => setFcReposManual(e.target.value)}
+                placeholder="—"
+                style={{ ...inputStyle, fontFamily: "'JetBrains Mono', monospace", fontSize: 17, fontWeight: 600 }}
+              />
+            </div>
+          </div>
+        </Card>
+      )}
+
       <Card label={t("questionnaire_sleep_hours")}>
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           <div>
@@ -68,30 +106,7 @@ export default function QuestionnaireForm({ initialValues, onSubmit, t }) {
         </div>
       </Card>
 
-      <Card label={t("questionnaire_hooper_title")}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          {HOOPER_ITEMS.map((def) => {
-            const val = hooperValues[def.key] ?? 4;
-            const bad = val >= 5;
-            return (
-              <div key={def.key}>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
-                  <span style={{ fontSize: 12.5, color: INK }}>{t(def.labelKey)}</span>
-                  <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, color: bad ? RED : ACCENT }}>{val}/7</span>
-                </div>
-                <div style={{ fontSize: 10.5, color: MUTED2, marginBottom: 6 }}>{t(def.hintKey)}</div>
-                <input
-                  type="range" min={1} max={7} value={val}
-                  onChange={(e) => updateHooper(def.key, +e.target.value)}
-                  style={{ width: "100%" }}
-                />
-              </div>
-            );
-          })}
-        </div>
-      </Card>
-
-      <Card label={t("questionnaire_other_title")}>
+      <Card label={t("questionnaire_title")}>
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           {QUESTIONNAIRE_ITEMS.map((def) => {
             const val = values[def.key] ?? 0;
