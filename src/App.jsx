@@ -12,7 +12,7 @@ import {
 
   Timer, Bell, Pencil, Image as ImageIcon, Film, Globe, Apple, Flame, Salad, ChevronDown,
 
-  TrendingUp, TrendingDown, Minus, Info, AlertTriangle, ChevronUp, LineChart as LineChartIcon, Wind,
+  TrendingUp, TrendingDown, Minus, Info, AlertTriangle, ChevronUp, LineChart as LineChartIcon, Wind, Copy, Sunrise,
 
 } from "lucide-react";
 
@@ -27,6 +27,7 @@ import CmjDecisionStep from "./morning/CmjDecisionStep.jsx";
 import MorningReadinessCard from "./morning/MorningReadinessCard.jsx";
 import { buildMorningCheckinPayload } from "./morning/morningCheckinPersistence.js";
 import { mapMorningCheckinToLegacyCheckin } from "./morning/legacyCheckinBridge.js";
+import { isNotificationSupported, getNotificationPermission, requestNotificationPermission, registerNotificationServiceWorker, showLocalNotification } from "./notifications/pushNotifications.js";
 
 // ============================================================
 
@@ -152,6 +153,8 @@ function syncAthleteProfile(athlete) {
 
       hormonalTrackingEnabled: !!athlete.hormonalTrackingEnabled,
 
+      dinnerTime: athlete.dinnerTime || "19:30",
+
       cycleInfo: athlete.cycleInfo || { averageCycleLengthDays: 28, regularity: "regular", contraception: "none", isPregnantOrPostpartum: false, isPerimenopausal: false },
 
       enabledSymptoms: athlete.enabledSymptoms || DEFAULT_ENABLED_SYMPTOMS,
@@ -255,7 +258,7 @@ const DICT = {
 
     session_type: "Type de séance", swim: "Natation", bike: "Vélo", run: "Course", strength: "Renforcement musculaire",
 
-    add_session: "Ajouter une séance", edit: "Modifier", back: "Retour", save: "Enregistrer", delete: "Supprimer",
+    add_session: "Ajouter une séance", edit: "Modifier", duplicate: "Dupliquer", duplicate_confirm: "Dupliquer ici", back: "Retour", save: "Enregistrer", delete: "Supprimer", enable_notifications: "Activer les notifications",
 
     comment: "Commentaire", attachments: "Pièces jointes", add_file: "Ajouter un fichier", no_file: "Aucun fichier",
 
@@ -330,6 +333,7 @@ const DICT = {
     training_time: "Heure d'entraînement", pre_meal_tag: "Repas pré-séance", post_meal_tag: "Repas post-séance",
 
     meal_time_hint: "La répartition des repas s'ajuste selon cette heure.",
+    dinner_time: "Heure du dîner", dinner_time_hint: "Ajuste le repas du soir sans décaler l'entraînement.",
 
     race_objective: "Objectif course", race_mode_none: "Normal", race_mode_carb_load: "Charge glucidique",
 
@@ -445,7 +449,7 @@ const DICT = {
 
     session_type: "Session type", swim: "Swimming", bike: "Cycling", run: "Running", strength: "Strength training",
 
-    add_session: "Add a session", edit: "Edit", back: "Back", save: "Save", delete: "Delete",
+    add_session: "Add a session", edit: "Edit", duplicate: "Duplicate", duplicate_confirm: "Duplicate here", back: "Back", save: "Save", delete: "Delete", enable_notifications: "Enable notifications",
 
     comment: "Comment", attachments: "Attachments", add_file: "Add a file", no_file: "No file",
 
@@ -520,6 +524,7 @@ const DICT = {
     training_time: "Training time", pre_meal_tag: "Pre-session meal", post_meal_tag: "Post-session meal",
 
     meal_time_hint: "Meal distribution adjusts around this time.",
+    dinner_time: "Dinner time", dinner_time_hint: "Adjusts the evening meal without shifting training.",
 
     race_objective: "Race objective", race_mode_none: "Normal", race_mode_carb_load: "Carb loading",
 
@@ -635,7 +640,7 @@ const DICT = {
 
     session_type: "Tipo de sesión", swim: "Natación", bike: "Ciclismo", run: "Carrera", strength: "Fuerza",
 
-    add_session: "Añadir sesión", edit: "Editar", back: "Volver", save: "Guardar", delete: "Eliminar",
+    add_session: "Añadir sesión", edit: "Editar", duplicate: "Duplicar", duplicate_confirm: "Duplicar aquí", back: "Volver", save: "Guardar", delete: "Eliminar", enable_notifications: "Activar notificaciones",
 
     comment: "Comentario", attachments: "Archivos adjuntos", add_file: "Añadir archivo", no_file: "Sin archivo",
 
@@ -710,6 +715,7 @@ const DICT = {
     training_time: "Hora de entrenamiento", pre_meal_tag: "Comida pre-sesión", post_meal_tag: "Comida post-sesión",
 
     meal_time_hint: "El reparto de comidas se ajusta según esta hora.",
+    dinner_time: "Hora de la cena", dinner_time_hint: "Ajusta la comida de la noche sin desplazar el entrenamiento.",
 
     race_objective: "Objetivo de carrera", race_mode_none: "Normal", race_mode_carb_load: "Carga de carbohidratos",
 
@@ -1852,45 +1858,30 @@ const MEAL_TIME_MINUTES = { breakfast: 7 * 60 + 30, lunch: 12 * 60 + 30, snack: 
 
 const timeToMinutes = (hhmm) => { const [h, m] = String(hhmm || "07:00").split(":").map(Number); return h * 60 + (m || 0); };
 
-function assignMealRoles(trainingTime, fueling) {
-
+function assignMealRoles(trainingTime, fueling, mealTimes = MEAL_TIME_MINUTES) {
   if (!trainingTime || !fueling) return { preSlot: null, postSlot: null };
-
   const trainStart = timeToMinutes(trainingTime);
-
   const trainEnd = trainStart + (fueling.totalMin || 0);
-
-  const beforeSlots = MEAL_SLOTS.filter(s => MEAL_TIME_MINUTES[s] < trainStart);
-
+  const beforeSlots = MEAL_SLOTS.filter(s => mealTimes[s] < trainStart);
   let preSlot = null;
-
   if (beforeSlots.length) {
-
     const idealPreTime = trainStart - fueling.preHours * 60;
-
-    preSlot = beforeSlots.reduce((best, s) => Math.abs(MEAL_TIME_MINUTES[s] - idealPreTime) < Math.abs(MEAL_TIME_MINUTES[best] - idealPreTime) ? s : best, beforeSlots[0]);
-
+    preSlot = beforeSlots.reduce((best, s) => Math.abs(mealTimes[s] - idealPreTime) < Math.abs(mealTimes[best] - idealPreTime) ? s : best, beforeSlots[0]);
   } else {
-
     preSlot = MEAL_SLOTS[0]; // séance très tôt : on ancre quand même sur le petit-déjeuner
-
   }
-
-  const afterSlots = MEAL_SLOTS.filter(s => MEAL_TIME_MINUTES[s] >= trainEnd && s !== preSlot);
-
-  const postSlot = afterSlots.length ? afterSlots.reduce((best, s) => MEAL_TIME_MINUTES[s] < MEAL_TIME_MINUTES[best] ? s : best, afterSlots[0]) : null;
-
+  const afterSlots = MEAL_SLOTS.filter(s => mealTimes[s] >= trainEnd && s !== preSlot);
+  const postSlot = afterSlots.length ? afterSlots.reduce((best, s) => mealTimes[s] < mealTimes[best] ? s : best, afterSlots[0]) : null;
   return { preSlot, postSlot };
-
 }
 
-function computeSlotTargets(targets, fueling, trainingTime) {
+function computeSlotTargets(targets, fueling, trainingTime, mealTimes = MEAL_TIME_MINUTES) {
 
   const base = {};
 
   MEAL_SLOTS.forEach(s => { base[s] = { kcal: targets.kcal * SLOT_SHARE[s], carbs: targets.carbs * SLOT_SHARE[s], protein: targets.protein * SLOT_SHARE[s], fat: targets.fat * SLOT_SHARE[s] }; });
 
-  const { preSlot, postSlot } = assignMealRoles(trainingTime, fueling);
+  const { preSlot, postSlot } = assignMealRoles(trainingTime, fueling, mealTimes);
 
   if (!preSlot && !postSlot) return { slots: roundSlots(base), preSlot: null, postSlot: null };
 
@@ -2452,6 +2443,35 @@ function Card({ label, children, right }) {
 
 }
 
+// Modale de bienvenue proposant de démarrer le Morning Check-in — affichée
+// tant que l'athlète n'a pas fait son check-in du jour (voir usage dans
+// BioSyncApp). Overlay plein écran, fermable sans forcer l'action.
+function WelcomeCheckinModal({ athleteName, onStart, onDismiss, t }) {
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "rgba(6,10,20,0.72)", zIndex: 200,
+      display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
+    }} onClick={onDismiss}>
+      <div onClick={e => e.stopPropagation()} style={{
+        background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 18, padding: 24,
+        maxWidth: 360, width: "100%", textAlign: "center",
+      }}>
+        <div style={{ width: 52, height: 52, borderRadius: 26, background: `${ACCENT}1E`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px" }}>
+          <Sunrise size={24} color={ACCENT} />
+        </div>
+        <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 17, marginBottom: 6 }}>
+          {t("welcome_checkin_title").replace("{name}", athleteName || "")}
+        </div>
+        <div style={{ fontSize: 12.5, color: MUTED, marginBottom: 20 }}>{t("welcome_checkin_hint")}</div>
+        <button onClick={onStart} style={{ ...btnPrimary, width: "100%", justifyContent: "center", marginBottom: 8 }}>
+          {t("welcome_checkin_start")}
+        </button>
+        <button onClick={onDismiss} style={{ ...btnGhost, width: "100%", justifyContent: "center" }}>{t("welcome_checkin_later")}</button>
+      </div>
+    </div>
+  );
+}
+
 function MetricCard({ icon: Icon, label, value, unit, sub, valueColor }) {
 
   return <div style={{ background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 14, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
@@ -2644,6 +2664,34 @@ function NotifBell({ notifs, onOpen, open, setOpen, t }) {
 
 // ============================================================
 
+// Bouton discret d'activation des notifications natives — ne s'affiche que
+// tant que la permission n'a jamais été demandée ("default"). Disparaît
+// silencieusement si accordée, refusée, ou si le navigateur ne supporte
+// pas l'API (Safari iOS ancien notamment).
+function NotificationPermissionButton({ t }) {
+  const [permission, setPermission] = useState(() => (isNotificationSupported() ? getNotificationPermission() : "unsupported"));
+
+  useEffect(() => {
+    if (permission === "granted") registerNotificationServiceWorker();
+  }, [permission]);
+
+  if (permission !== "default") return null;
+
+  async function handleClick() {
+    await registerNotificationServiceWorker();
+    const result = await requestNotificationPermission();
+    setPermission(result);
+  }
+
+  return (
+    <button onClick={handleClick} title={t("enable_notifications")} style={{
+      background: "transparent", border: `1px solid ${BORDER}`, color: ACCENT, borderRadius: 9, padding: 8, cursor: "pointer",
+    }}>
+      <Bell size={16} />
+    </button>
+  );
+}
+
 function Shell({ title, subtitle, tabs, tab, setTab, onLogout, notifs, onOpenNotifs, notifOpen, setNotifOpen, t, children }) {
 
   return (
@@ -2677,6 +2725,8 @@ function Shell({ title, subtitle, tabs, tab, setTab, onLogout, notifs, onOpenNot
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+
+          <NotificationPermissionButton t={t} />
 
           <NotifBell notifs={notifs} onOpen={onOpenNotifs} open={notifOpen} setOpen={setNotifOpen} t={t} />
 
@@ -3216,6 +3266,10 @@ function SessionCalendar({ sessions, setSessions, athleteId, readOnly, onOpenDeb
 
   const [expandedId, setExpandedId] = useState(null);
 
+  const [duplicatingId, setDuplicatingId] = useState(null);
+
+  const [duplicateTargetDate, setDuplicateTargetDate] = useState(TODAY);
+
   const year = cursor.getFullYear(), month = cursor.getMonth();
 
   const grid = useMemo(() => {
@@ -3298,6 +3352,21 @@ function SessionCalendar({ sessions, setSessions, athleteId, readOnly, onOpenDeb
 
     setEditingId(null);
 
+  }
+
+  // Duplique une séance vers une autre date (ou la même) : nouvel id,
+  // statut remis à "planifie", commentaire/pièces jointes du debrief
+  // d'origine non repris (ce sont des données liées à la réalisation de
+  // LA séance d'origine, pas au modèle de séance qu'on veut réutiliser).
+  function duplicateSession(session, targetDate) {
+    const copy = { ...session, id: uid(), status: "planifie", comment: "", attachments: [] };
+    setSessions(prev => {
+      const targetDay = (prev[athleteId] || {})[targetDate] || [];
+      return { ...prev, [athleteId]: { ...(prev[athleteId] || {}), [targetDate]: [...targetDay, copy] } };
+    });
+    sheetsPost({ action: "saveSession", athleteId, date: targetDate, session: copy });
+    notify(athleteId, `${t("nav_sessions")}: ${copy.title || t(copy.discipline)} — ${fmtDate(targetDate, lang)}`);
+    setDuplicatingId(null);
   }
 
   const dayNames = useMemo(() => {
@@ -3436,11 +3505,29 @@ function SessionCalendar({ sessions, setSessions, athleteId, readOnly, onOpenDeb
 
                   </div>
 
+                  {!readOnly && (
+                    <button onClick={e => { e.stopPropagation(); setDuplicatingId(duplicatingId === s.id ? null : s.id); setDuplicateTargetDate(selected); }} style={{ ...btnGhost, padding: "6px 10px" }}>
+                      <Copy size={13} /> {t("duplicate")}
+                    </button>
+                  )}
+
                   {!readOnly && <button onClick={e => { e.stopPropagation(); setEditingId(s.id); }} style={{ ...btnGhost, padding: "6px 10px" }}><Pencil size={13} /> {t("edit")}</button>}
 
                   <ChevronRight size={16} color={MUTED2} style={{ transform: isExpanded ? "rotate(90deg)" : "none", transition: "transform 0.15s", flexShrink: 0 }} />
 
                 </div>
+
+                {duplicatingId === s.id && (
+                  <div onClick={e => e.stopPropagation()} style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, paddingTop: 10, borderTop: `1px solid ${BORDER}` }}>
+                    <input
+                      type="date" value={duplicateTargetDate} onChange={e => setDuplicateTargetDate(e.target.value)}
+                      style={{ ...inputStyle, flex: 1, fontFamily: "'JetBrains Mono', monospace", fontSize: 13 }}
+                    />
+                    <button onClick={() => duplicateSession(s, duplicateTargetDate)} style={{ ...btnPrimary, padding: "8px 12px" }}>
+                      <Copy size={13} /> {t("duplicate_confirm")}
+                    </button>
+                  </div>
+                )}
 
                 {isExpanded && (
 
@@ -4648,23 +4735,54 @@ function DebriefForm({ debriefs, setDebriefs, athleteId, target, onDone, notify,
 
   const [zone, setZone] = useState(""); const [notes, setNotes] = useState(""); const [file, setFile] = useState(null);
 
-  const [fileErr, setFileErr] = useState(""); const [done, setDone] = useState(false);
+  const [fileErr, setFileErr] = useState(""); const [fileReading, setFileReading] = useState(false); const [done, setDone] = useState(false);
 
   function toggleSensation(s) { setSensations(prev => prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s]); }
 
-  function handleFile(f) { if (!f) return; const ext = f.name.split(".").pop().toLowerCase();
+  const MAX_DEBRIEF_FILE_MB = 8;
 
-    if (!["csv", "fit", "gpx"].includes(ext)) { setFileErr("—"); return; } setFileErr(""); setFile({ name: f.name, ext }); }
+  function handleFile(f) {
+    if (!f) return;
+    const ext = f.name.split(".").pop().toLowerCase();
+    if (!["csv", "fit", "gpx"].includes(ext)) { setFileErr("—"); return; }
+    if (f.size > MAX_DEBRIEF_FILE_MB * 1024 * 1024) { setFileErr(`> ${MAX_DEBRIEF_FILE_MB}MB`); return; }
+    setFileErr(""); setFileReading(true);
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64 = String(reader.result).split(",")[1] || "";
+      setFile({ name: f.name, ext, base64, mimeType: f.type || "application/octet-stream" });
+      setFileReading(false);
+    };
+    reader.onerror = () => { setFileErr("—"); setFileReading(false); };
+    reader.readAsDataURL(f);
+  }
 
   function submit() {
 
     const dateKey = target?.dateKey || TODAY; const sessionId = target?.session?.id || "none";
 
-    const payload = { rpe, duration, painIntensity, zone, sensations, notes, file };
+    // On garde localement seulement le nom (pas le base64, lourd) — le lien
+    // Drive réel arrive ensuite via la réponse de sheetsPost.
+    const localFile = file ? { name: file.name } : null;
+    const payload = { rpe, duration, painIntensity, zone, sensations, notes, file: localFile };
 
     setDebriefs(prev => ({ ...prev, [athleteId]: { ...(prev[athleteId] || {}), [dateKey]: { ...(prev[athleteId]?.[dateKey] || {}), [sessionId]: payload } } }));
 
-    sheetsPost({ action: "saveDebrief", athleteId, date: dateKey, sessionId, data: payload });
+    sheetsPost({ action: "saveDebrief", athleteId, date: dateKey, sessionId, data: { rpe, duration, painIntensity, zone, sensations, notes, file } })
+      .then((res) => {
+        if (res?.file?.url) {
+          setDebriefs(prev => ({
+            ...prev,
+            [athleteId]: {
+              ...(prev[athleteId] || {}),
+              [dateKey]: {
+                ...(prev[athleteId]?.[dateKey] || {}),
+                [sessionId]: { ...payload, file: res.file },
+              },
+            },
+          }));
+        }
+      });
 
     notify("debrief", athleteId, `RPE ${rpe}/10, douleur ${painIntensity}/10`);
 
@@ -4734,6 +4852,10 @@ function DebriefForm({ debriefs, setDebriefs, athleteId, target, onDone, notify,
 
             <button onClick={() => setFile(null)} style={{ background: "transparent", border: "none", color: MUTED2, cursor: "pointer" }}><X size={15} /></button></div>
 
+        ) : fileReading ? (
+
+          <div style={{ textAlign: "center", padding: "14px", fontSize: 11.5, color: MUTED }}>…</div>
+
         ) : (
 
           <label style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 5, border: `1.5px dashed ${BORDER}`, borderRadius: 10, padding: "18px 10px", cursor: "pointer" }}>
@@ -4784,6 +4906,8 @@ function NutritionModule({ athlete, setAthletes, sessions, debriefs, nutritionHi
 
   const trainingTime = athlete.trainingTime || "07:00";
 
+  const dinnerTime = athlete.dinnerTime || "19:30";
+
   const raceMode = athlete.raceMode || "none";
 
   const raceDurationHours = athlete.raceDurationHours || 3.5;
@@ -4800,7 +4924,9 @@ function NutritionModule({ athlete, setAthletes, sessions, debriefs, nutritionHi
 
   const targets = computeNutritionTargets(athlete.profile, loadLevel, raceMode);
 
-  const distribution = computeSlotTargets(targets, fueling, trainingTime);
+  const customMealTimes = { ...MEAL_TIME_MINUTES, dinner: timeToMinutes(dinnerTime) };
+
+  const distribution = computeSlotTargets(targets, fueling, trainingTime, customMealTimes);
 
   const meals = pickMealsForTargets(athlete.diet || [], distribution.slots);
 
@@ -4822,7 +4948,7 @@ function NutritionModule({ athlete, setAthletes, sessions, debriefs, nutritionHi
 
     return () => clearTimeout(timeout);
 
-  }, [athlete.profile.weight, athlete.profile.height, athlete.profile.age, athlete.profile.sex, athlete.profile.goal, JSON.stringify(athlete.diet), athlete.nutritionEnabled, raceMode, trainingTime, raceDurationHours, JSON.stringify(athlete.mealOverrides), athlete.carbsPerHourTarget]);
+  }, [athlete.profile.weight, athlete.profile.height, athlete.profile.age, athlete.profile.sex, athlete.profile.goal, JSON.stringify(athlete.diet), athlete.nutritionEnabled, raceMode, trainingTime, dinnerTime, raceDurationHours, JSON.stringify(athlete.mealOverrides), athlete.carbsPerHourTarget]);
 
   function updateProfile(patch) {
 
@@ -4834,6 +4960,10 @@ function NutritionModule({ athlete, setAthletes, sessions, debriefs, nutritionHi
 
     setAthletes(prev => prev.map(a => a.id === athleteId ? { ...a, trainingTime: value } : a));
 
+  }
+
+  function setDinnerTime(value) {
+    setAthletes(prev => prev.map(a => a.id === athleteId ? { ...a, dinnerTime: value } : a));
   }
 
   function setRaceMode(value) {
@@ -5136,6 +5266,11 @@ function NutritionModule({ athlete, setAthletes, sessions, debriefs, nutritionHi
 
             <div style={{ fontSize: 11, color: MUTED2, marginTop: 6 }}>{t("meal_time_hint")}</div>
 
+          </Card>
+
+          <Card label={t("dinner_time")}>
+            <input type="time" value={dinnerTime} onChange={e => setDinnerTime(e.target.value)} style={{ ...inputStyle, fontFamily: "'JetBrains Mono', monospace", fontSize: 16, fontWeight: 600, width: 130 }} />
+            <div style={{ fontSize: 11, color: MUTED2, marginTop: 6 }}>{t("dinner_time_hint")}</div>
           </Card>
 
           {raceMode === "race_day" && racePlan && (
@@ -5622,7 +5757,17 @@ function CoachInbox({ athletes, checkins, debriefs, activeId, setActiveId, t, la
 
                   <span style={{ color: MUTED }}>{t("pain")} <b style={{ color: deb.painIntensity >= 5 ? RED : INK, fontFamily: "'JetBrains Mono', monospace" }}>{deb.painIntensity}/10</b>{deb.zone ? ` (${t(deb.zone)})` : ""}</span>
 
-                  {deb.file && <span style={{ color: ACCENT }}><FileText size={11} style={{ verticalAlign: -1, marginRight: 3 }} />{deb.file.name}</span>}
+                  {deb.file && (
+                    deb.file.url ? (
+                      <a href={deb.file.url} target="_blank" rel="noreferrer" style={{ color: ACCENT, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                        <FileText size={11} />{deb.file.name}
+                      </a>
+                    ) : (
+                      <span style={{ color: MUTED2, display: "inline-flex", alignItems: "center", gap: 4 }}>
+                        <FileText size={11} />{deb.file.name}{deb.file.error ? " (échec upload)" : ""}
+                      </span>
+                    )
+                  )}
 
                   {deb.notes && <div style={{ width: "100%", color: MUTED2, fontStyle: "italic" }}>« {deb.notes} »</div>}
 
@@ -5674,6 +5819,7 @@ export default function BioSyncApp() {
 
   const [cmjHistory, setCmjHistory] = useState({});
   const [morningCheckinHistory, setMorningCheckinHistory] = useState({});
+  const [welcomeCheckinDismissed, setWelcomeCheckinDismissed] = useState(false);
 
   const [messages, setMessages] = useState(MSG_SEED);
 
@@ -5690,9 +5836,9 @@ export default function BioSyncApp() {
   const [debriefTarget, setDebriefTarget] = useState(null);
 
   function pushNotif(role, athleteId, text) {
-
     setNotifs(prev => [...prev, { id: uid(), role, athleteId, text, time: "maintenant", read: false }]);
-
+    const isForCurrentUser = user && (user.role === "coach" ? role === "coach" : role === "athlete" && athleteId === user.athleteId);
+    if (isForCurrentUser) showLocalNotification("BioSync", { body: text, tag: "biosync-notif" });
   }
 
   // Charge les données d'un athlète depuis Google Sheets (si SHEETS_API_URL est configuré)
@@ -5713,7 +5859,7 @@ export default function BioSyncApp() {
 
       diet: data.profile.diet || [], nutritionEnabled: !!data.profile.nutritionEnabled,
 
-      raceMode: data.profile.raceMode || "none", trainingTime: data.profile.trainingTime || "07:00",
+      raceMode: data.profile.raceMode || "none", trainingTime: data.profile.trainingTime || "07:00", dinnerTime: data.profile.dinnerTime || "19:30",
 
       raceDurationHours: data.profile.raceDurationHours || 3.5, mealOverrides: data.profile.mealOverrides || {},
 
@@ -5947,7 +6093,19 @@ export default function BioSyncApp() {
 
   ];
 
+  const hasCheckedInToday = !!(morningCheckinHistory[user.athleteId] || {})[TODAY];
+  const showWelcomeCheckin = !hasCheckedInToday && !welcomeCheckinDismissed && athleteTab !== "checkin";
+
   return (
+    <>
+      {showWelcomeCheckin && (
+        <WelcomeCheckinModal
+          athleteName={user.name.split(" ")[0]}
+          onStart={() => { setWelcomeCheckinDismissed(true); setAthleteTab("checkin"); }}
+          onDismiss={() => setWelcomeCheckinDismissed(true)}
+          t={t}
+        />
+      )}
 
     <Shell title={`${user.name.split(" ")[0]}`} subtitle={t("space_athlete")} tabs={tabs} tab={athleteTab} setTab={setAthleteTab} onLogout={logout}
 
@@ -5987,7 +6145,7 @@ export default function BioSyncApp() {
       {athleteTab === "messages" && <Messages messages={messages} setMessages={setMessages} athletes={athletes} activeId={user.athleteId} setActiveId={() => {}} role="athlete" notify={notifyMessage} t={t} />}
 
     </Shell>
-
+    </>
   );
 
 }
