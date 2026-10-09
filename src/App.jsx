@@ -4735,59 +4735,49 @@ function DebriefForm({ debriefs, setDebriefs, athleteId, target, onDone, notify,
 
   const [zone, setZone] = useState(""); const [notes, setNotes] = useState(""); const [file, setFile] = useState(null);
 
-  const [fileErr, setFileErr] = useState(""); const [fileReading, setFileReading] = useState(false); const [done, setDone] = useState(false);
+  const [fileErr, setFileErr] = useState(""); const [done, setDone] = useState(false);
 
   function toggleSensation(s) { setSensations(prev => prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s]); }
 
-  const MAX_DEBRIEF_FILE_MB = 8;
+  // Lit le fichier en base64 pour que le backend Apps Script puisse écrire un
+  // vrai fichier dans Drive (sinon seul le nom arrivait dans le Sheet).
+  function readFileAsBase64(fileObj) {
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(String(r.result).split(",")[1]);
+      r.onerror = reject;
+      r.readAsDataURL(fileObj);
+    });
+  }
 
-  function handleFile(f) {
+  const MAX_DEBRIEF_FILE_BYTES = 8 * 1024 * 1024; // le base64 gonfle de ~33 %
+
+  async function handleFile(f) {
     if (!f) return;
     const ext = f.name.split(".").pop().toLowerCase();
     if (!["csv", "fit", "gpx"].includes(ext)) { setFileErr("—"); return; }
-    if (f.size > MAX_DEBRIEF_FILE_MB * 1024 * 1024) { setFileErr(`> ${MAX_DEBRIEF_FILE_MB}MB`); return; }
-    setFileErr(""); setFileReading(true);
-    const reader = new FileReader();
-    reader.onload = () => {
-      const base64 = String(reader.result).split(",")[1] || "";
-      setFile({ name: f.name, ext, base64, mimeType: f.type || "application/octet-stream" });
-      setFileReading(false);
-    };
-    reader.onerror = () => { setFileErr("—"); setFileReading(false); };
-    reader.readAsDataURL(f);
+    if (f.size > MAX_DEBRIEF_FILE_BYTES) { setFileErr("Fichier trop volumineux (max 8 Mo)"); return; }
+    setFileErr("");
+    try {
+      const base64 = await readFileAsBase64(f);
+      setFile({ name: f.name, ext, mimeType: f.type || "application/octet-stream", base64 });
+    } catch (e) { setFileErr("Lecture du fichier impossible"); }
   }
 
-  function submit() {
-
+  async function submit() {
     const dateKey = target?.dateKey || TODAY; const sessionId = target?.session?.id || "none";
+    // payload complet (avec base64) -> Google Sheets / Drive
+    const payload = { rpe, duration, painIntensity, zone, sensations, notes, file };
+    // version locale sans base64 pour ne pas garder un gros blob dans le state React
+    const localPayload = { ...payload, file: file ? { name: file.name, ext: file.ext } : null };
 
-    // On garde localement seulement le nom (pas le base64, lourd) — le lien
-    // Drive réel arrive ensuite via la réponse de sheetsPost.
-    const localFile = file ? { name: file.name } : null;
-    const payload = { rpe, duration, painIntensity, zone, sensations, notes, file: localFile };
+    setDebriefs(prev => ({ ...prev, [athleteId]: { ...(prev[athleteId] || {}), [dateKey]: { ...(prev[athleteId]?.[dateKey] || {}), [sessionId]: localPayload } } }));
 
-    setDebriefs(prev => ({ ...prev, [athleteId]: { ...(prev[athleteId] || {}), [dateKey]: { ...(prev[athleteId]?.[dateKey] || {}), [sessionId]: payload } } }));
-
-    sheetsPost({ action: "saveDebrief", athleteId, date: dateKey, sessionId, data: { rpe, duration, painIntensity, zone, sensations, notes, file } })
-      .then((res) => {
-        if (res?.file?.url) {
-          setDebriefs(prev => ({
-            ...prev,
-            [athleteId]: {
-              ...(prev[athleteId] || {}),
-              [dateKey]: {
-                ...(prev[athleteId]?.[dateKey] || {}),
-                [sessionId]: { ...payload, file: res.file },
-              },
-            },
-          }));
-        }
-      });
+    const res = await sheetsPost({ action: "saveDebrief", athleteId, date: dateKey, sessionId, data: payload });
+    if (res?.file?.error) console.error("Upload Drive échoué :", res.file.error);
 
     notify("debrief", athleteId, `RPE ${rpe}/10, douleur ${painIntensity}/10`);
-
     setDone(true); if (onDone) onDone();
-
   }
 
   if (done) return <Card><div style={{ textAlign: "center", padding: "10px 0" }}><CheckCircle2 size={30} color={ACCENT} style={{ marginBottom: 8 }} />
@@ -4851,10 +4841,6 @@ function DebriefForm({ debriefs, setDebriefs, athleteId, target, onDone, notify,
             <FileText size={15} color={ACCENT} /><span style={{ flex: 1, fontSize: 12.5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{file.name}</span>
 
             <button onClick={() => setFile(null)} style={{ background: "transparent", border: "none", color: MUTED2, cursor: "pointer" }}><X size={15} /></button></div>
-
-        ) : fileReading ? (
-
-          <div style={{ textAlign: "center", padding: "14px", fontSize: 11.5, color: MUTED }}>…</div>
 
         ) : (
 
@@ -5757,17 +5743,9 @@ function CoachInbox({ athletes, checkins, debriefs, activeId, setActiveId, t, la
 
                   <span style={{ color: MUTED }}>{t("pain")} <b style={{ color: deb.painIntensity >= 5 ? RED : INK, fontFamily: "'JetBrains Mono', monospace" }}>{deb.painIntensity}/10</b>{deb.zone ? ` (${t(deb.zone)})` : ""}</span>
 
-                  {deb.file && (
-                    deb.file.url ? (
-                      <a href={deb.file.url} target="_blank" rel="noreferrer" style={{ color: ACCENT, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4 }}>
-                        <FileText size={11} />{deb.file.name}
-                      </a>
-                    ) : (
-                      <span style={{ color: MUTED2, display: "inline-flex", alignItems: "center", gap: 4 }}>
-                        <FileText size={11} />{deb.file.name}{deb.file.error ? " (échec upload)" : ""}
-                      </span>
-                    )
-                  )}
+                  {deb.file && (deb.file.url
+                    ? <a href={deb.file.url} target="_blank" rel="noreferrer" style={{ color: ACCENT }}><FileText size={11} style={{ verticalAlign: -1, marginRight: 3 }} />{deb.file.name}</a>
+                    : <span style={{ color: MUTED2 }}><FileText size={11} style={{ verticalAlign: -1, marginRight: 3 }} />{deb.file.name}</span>)}
 
                   {deb.notes && <div style={{ width: "100%", color: MUTED2, fontStyle: "italic" }}>« {deb.notes} »</div>}
 
